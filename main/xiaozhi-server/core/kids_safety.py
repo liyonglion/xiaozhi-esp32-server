@@ -211,6 +211,21 @@ def _rewrite_last_assistant(conn, assistant_msg, tpl):
         conn.logger.bind(tag=TAG).warning("窗口末条已变化，跳过改写（保留原话）")
 
 
+def record_interception(conn, cat, user_text, reply_text, actual_text):
+    """拦截事件（统一 dict 结构）挂连接级列表；输出安全门与输入侧三档共用。"""
+    _append_capped(
+        conn.kids_interceptions,
+        {
+            "t": time.time(),
+            "when": _now_str(),
+            "cat": cat,
+            "user": user_text,
+            "reply": reply_text,
+            "actual": actual_text,
+        },
+    )
+
+
 def _safety_block(conn, cat, user_text, reply_text, assistant_msg):
     """拦截动作：弃音频换模板 + 改写窗口 + 记拦截事件。"""
     topic = _pick_topic_for_conn(conn)
@@ -226,17 +241,7 @@ def _safety_block(conn, cat, user_text, reply_text, assistant_msg):
     _speak_template(conn, tpl)
     _rewrite_last_assistant(conn, assistant_msg, tpl)
     conn.logger.bind(tag=TAG).error(f"安全拦截：类别 {cat}，已换兜底话术")
-    _append_capped(
-        conn.kids_interceptions,
-        {
-            "t": time.time(),
-            "when": _now_str(),
-            "cat": cat,
-            "user": user_text,
-            "reply": reply_text,
-            "actual": tpl,
-        },
-    )
+    record_interception(conn, cat, user_text, reply_text, tpl)
 
 
 def flush_interceptions(conn):

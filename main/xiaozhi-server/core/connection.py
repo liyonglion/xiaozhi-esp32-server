@@ -151,7 +151,7 @@ class ConnectionHandler:
 
         # 儿童陪伴模式开关（config.yaml kids.enabled；API 下发通道与档案字段归工单 #6）
         self.kids_enabled = bool(self.config.get("kids", {}).get("enabled", False))
-        # 输入侧三档决策事件（最近一轮），供输出安全门(#8)/拦截日志(#9)接走，本票不落库
+        # 输入侧三档决策事件（最近一轮），供输出安全门(#8)接走；拦截档另落 #9 日志链路
         self.kids_decision = None
 
         # 为每个连接单独管理声纹识别

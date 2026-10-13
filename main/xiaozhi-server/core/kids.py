@@ -8,8 +8,8 @@
   保留，系统运转方式不变。非儿童模式走原模板不动。
 - 输入侧三档（触发词表与话术逐字取自小布（源工程）accompany 验证过的 L1 规则）：
   红线话题→温柔转移；危险行为→阻断+安全提醒；灰色话题→年龄适配放行。
-- 决策事件 dict 契约（挂在 ``conn.kids_decision``，供 #8 输出安全门与
-  #9 拦截日志接走，本票不落库）::
+- 决策事件 dict 契约（挂在 ``conn.kids_decision``，供 #8 输出安全门接走；
+  输入拦截档由 receiveAudioHandle 转成拦截事件进 #9 日志链路）::
 
       {
           "category": "redline" | "danger" | "gray" | "pass",  # 三档+放行

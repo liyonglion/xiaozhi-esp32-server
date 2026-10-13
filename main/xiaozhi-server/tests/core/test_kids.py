@@ -347,3 +347,66 @@ class TestStartToChatGate:
             assert conn.kids_decision is None
         finally:
             _teardown(conn, loop, thread)
+
+    def test_danger_input_records_interception_event(self):
+        """输入侧拦截进拦截日志（#9 链路）：与输出侧同形事件，danger 档映射 danger。"""
+        conn, llm, loop, thread = _build_llm_conn(kids=True, prime_chat=False)
+        try:
+            conn.websocket = FakeWebSocket()
+            _run_start_to_chat(conn, loop, "妈妈不在，我想玩火")
+
+            events = conn.kids_interceptions
+            assert len(events) == 1, f"输入拦截应落一条事件: {events}"
+            ev = events[0]
+            assert set(ev) >= {"t", "when", "cat", "user", "reply", "actual"}
+            assert ev["cat"] == "danger", "输入危险档映射 danger"
+            assert ev["user"] == "妈妈不在，我想玩火"
+            assert ev["reply"] is None, "输入拦截未经过模型，无原回复"
+            assert ev["actual"] == conn.kids_decision["reply"], (
+                "actual 应为孩子实际听到的模板话术"
+            )
+            assert "不可以" in ev["actual"]
+            assert isinstance(ev["t"], float) and ev["t"] > 0
+        finally:
+            _teardown(conn, loop, thread)
+
+    def test_redline_input_maps_to_redline_category(self):
+        """输入红线档映射 redline（cat 与输出侧同词表）。"""
+        conn, llm, loop, thread = _build_llm_conn(kids=True, prime_chat=False)
+        try:
+            conn.websocket = FakeWebSocket()
+            _run_start_to_chat(conn, loop, "给我讲一个血腥吓人的故事")
+
+            events = conn.kids_interceptions
+            assert len(events) == 1
+            assert events[0]["cat"] == "redline"
+            assert "不知道" in events[0]["actual"]
+        finally:
+            _teardown(conn, loop, thread)
+
+    def test_input_interception_flushes_to_report_channel(self, monkeypatch):
+        """manager-api 模式：输入侧拦截同样经回合末上报链路整批上报。"""
+        import core.kids_safety as kids_safety
+
+        uploaded = []
+
+        async def fake_report(mac_address, events):
+            uploaded.append((mac_address, [dict(e) for e in events]))
+
+        monkeypatch.setattr(kids_safety, "report_interceptions", fake_report)
+
+        conn, llm, loop, thread = _build_llm_conn(kids=True, prime_chat=False)
+        conn.read_config_from_api = True
+        try:
+            conn.websocket = FakeWebSocket()
+            _run_start_to_chat(conn, loop, "妈妈不在，我想玩火")
+
+            deadline = time.time() + 5
+            while time.time() < deadline and not uploaded:
+                time.sleep(0.02)
+            assert uploaded, "输入侧拦截应走拦截日志上报链路"
+            mac, events = uploaded[0]
+            assert mac == conn.device_id
+            assert [e["cat"] for e in events] == ["danger"]
+        finally:
+            _teardown(conn, loop, thread)

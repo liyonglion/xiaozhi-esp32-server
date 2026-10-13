@@ -11,6 +11,7 @@ from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent, speak_txt
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
 from core.kids import DEFAULT_AGE_BAND, decide_kids_input
+from core.kids_safety import flush_interceptions, record_interception
 from core.utils.kids_profile import age_band
 
 TAG = __name__
@@ -98,7 +99,7 @@ async def startToChat(conn: "ConnectionHandler", text):
 
     # 儿童模式：输入侧三档决策（工单 #5）
     # 红线话题→温柔转移；危险行为→阻断+安全提醒；灰色话题→年龄适配放行。
-    # 决策事件挂 conn.kids_decision，供输出安全门(#8)/拦截日志(#9)接走，不落库。
+    # 决策事件挂 conn.kids_decision，供输出安全门(#8)接走。
     if conn.kids_enabled:
         # 年龄档位（#6 缝）：从连接的 kids 档案按生日计算；缺档案退缺省档
         band = age_band((conn.config.get("kids") or {}).get("birth_ym")) or DEFAULT_AGE_BAND
@@ -112,6 +113,13 @@ async def startToChat(conn: "ConnectionHandler", text):
             conn.client_abort = False
             conn.sentence_id = uuid.uuid4().hex
             speak_txt(conn, decision["reply"])
+            # 输入侧拦截进拦截日志（#9 链路）：与输出侧同形事件（cat 即决策档
+            # redline/danger；reply 为空——模型未被调用；actual 为孩子实际
+            # 听到的模板话术），随即排空上报（本分支不进 chat() 回合收尾）
+            record_interception(
+                conn, decision["category"], actual_text, None, decision["reply"]
+            )
+            flush_interceptions(conn)
             return
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
