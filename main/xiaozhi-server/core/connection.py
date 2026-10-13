@@ -31,7 +31,7 @@ from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
 from concurrent.futures import ThreadPoolExecutor
 from core.utils.dialogue import Message, Dialogue
-from core.kids_safety import run_safety_gate
+from core.kids_safety import flush_interceptions, run_safety_gate
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
@@ -1351,6 +1351,8 @@ class ConnectionHandler:
                             )
                             # direct_answer 也是主回答流，同样过安全门
                             run_safety_gate(self, query)
+                            # 拦截事件回合末排空上报（工单 #9）
+                            flush_interceptions(self)
                         return
 
                     tool_calls_list = real_tool_calls
@@ -1438,6 +1440,8 @@ class ConnectionHandler:
             # 儿童模式输出安全门（工单 #8）：主回答流结束后台分类，与 TTS
             # 合成并行；违规时弃音频、播兜底模板、改写窗口末条
             run_safety_gate(self, query)
+            # 拦截事件回合末排空上报（工单 #9）
+            flush_interceptions(self)
 
         return True
 

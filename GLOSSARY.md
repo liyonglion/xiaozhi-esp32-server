@@ -34,7 +34,10 @@
   家长、永不承诺保密），但同样替换当轮音频与窗口。
 - **拦截事件（interception event）**：安全门产出的统一 dict 结构
   `{t, when, cat, user, reply, actual}`（时间/类别/孩子原话/模型原回复/
-  孩子实际听到），挂连接级内存列表；落库与查询接口归工单 #9。
+  孩子实际听到），挂连接级内存列表；回合结束后排空并经 manager-api
+  通道整批上报（`/agent/interception-log/report`），落库环形 500 条、
+  care/redline 豁免挤出，家长页经 `/agent/interception-log/list/{agentId}`
+  按时间倒序查询（工单 #9）。
 - **连拦计数（block streak）**：非 care 类连续拦截轮数，连接级状态；满
   3 次后拦截模板附加活动提议并清零；care/safe/fail-open 均清零。
 - **fail-open**：分类通道故障（异常/输出不可识别/SLM 未配置）时放行本

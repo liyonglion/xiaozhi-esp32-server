@@ -293,6 +293,24 @@ async def report(
     )
 
 
+@api_guard("拦截日志上报失败")
+async def report_interceptions(instance, mac_address: str, interceptions: list) -> Optional[Dict]:
+    """儿童模式拦截日志批量上报（事件 dict：t/when/cat/user/reply/actual）。
+
+    环形 500 条与 care/redline 豁免挤出语义由 manager-api 持久层负责。
+    """
+    if not interceptions:
+        return None
+    return await instance._execute_async_request(
+        "POST",
+        "/agent/interception-log/report",
+        json={
+            "macAddress": mac_address,
+            "interceptions": interceptions,
+        },
+    )
+
+
 @api_guard("通讯录查找失败")
 async def lookup_address_book(instance, caller_mac: str, nickname: str) -> Optional[Dict]:
     """根据昵称查找目标设备"""

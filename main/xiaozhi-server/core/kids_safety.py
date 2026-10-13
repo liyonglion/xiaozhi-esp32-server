@@ -14,7 +14,8 @@ prompt 与话术模板逐字保留（prompt 契约：节标题与模板措辞维
 - 分类请求异常/超时/输出不可识别一律 fail-open 放行并留痕，对话不因
   审核通道故障中断，连拦计数清零。
 - 拦截事件为统一 dict 结构，挂连接级内存列表 ``conn.kids_interceptions``；
-  落库与查询接口归工单 #9。
+  回合结束由 :func:`flush_interceptions` 排空并经 manager-api 通道整批
+  上报，环形 500 条与 care/redline 豁免挤出在持久层（工单 #9）。
 
 话术模板来源：xb_core.c TPL_*（逐字）；槽位取材优先级：记忆最新条目
 （剥「喜欢」前缀）→ 档案「爱好」→ 静态兜底词随机。
@@ -27,6 +28,7 @@ import random
 import time
 from datetime import datetime
 
+from config.manage_api_client import report_interceptions
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 
 TAG = __name__
@@ -231,6 +233,34 @@ def _safety_block(conn, cat, user_text, reply_text, assistant_msg):
             "actual": tpl,
         },
     )
+
+
+def flush_interceptions(conn):
+    """回合结束：排空拦截事件并经 manager-api 通道整批上报（工单 #9）。
+
+    文件模式（未配 manager-api）跳过上报、内存留痕保留；环形 500 条与
+    care/redline 豁免挤出语义在 manager-api 持久层（入库后裁剪），Python
+    内存列表只做传输。上报失败仅记日志（fail-open，不阻塞对话）。
+    """
+    if not conn.read_config_from_api or conn.need_bind:
+        return
+    events = conn.kids_interceptions
+    if not events:
+        return
+    conn.kids_interceptions = []
+    if conn.executor is None:
+        return
+
+    def _upload():
+        try:
+            asyncio.run(report_interceptions(conn.device_id, events))
+        except Exception as e:  # noqa: BLE001 上报故障不连坐对话（fail-open）
+            conn.logger.bind(tag=TAG).error(f"拦截日志上报失败: {e}")
+
+    try:
+        conn.executor.submit(_upload)
+    except Exception as e:  # noqa: BLE001 线程池关闭期提交失败：仅留日志
+        conn.logger.bind(tag=TAG).error(f"拦截日志上报任务提交失败: {e}")
 
 
 def run_safety_gate(conn, user_text):

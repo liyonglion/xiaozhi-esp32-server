@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="xiaozhi.modules.agent.dao.AgentInterceptionLogDao">
+  <resultMap id="BaseResultMap" type="xiaozhi.modules.agent.entity.AgentInterceptionLogEntity">
+    <!--@Table ai_agent_interception_log-->
+    <id column="id" jdbcType="BIGINT" property="id" />
+    <result column="agent_id" jdbcType="VARCHAR" property="agentId" />
+    <result column="category" jdbcType="VARCHAR" property="category" />
+    <result column="user_text" jdbcType="LONGVARCHAR" property="userText" />
+    <result column="model_reply" jdbcType="LONGVARCHAR" property="modelReply" />
+    <result column="actual_reply" jdbcType="LONGVARCHAR" property="actualReply" />
+    <result column="occurred_at" jdbcType="TIMESTAMP" property="occurredAt" />
+    <result column="created_at" jdbcType="TIMESTAMP" property="createdAt" />
+    <result column="updated_at" jdbcType="TIMESTAMP" property="updatedAt" />
+  </resultMap>
+
+  <!-- 环形裁剪：care/redline 豁免（内外两层都排除豁免类），只裁更旧的可挤出记录；
+       MySQL 不允许直接删除子查询引用的表，故内层再包一层派生表 -->
+  <delete id="trimEvictable">
+    DELETE FROM ai_agent_interception_log
+    WHERE agent_id = #{agentId}
+      AND category NOT IN ('care', 'redline')
+      AND id NOT IN (
+        SELECT id FROM (
+          SELECT id FROM ai_agent_interception_log
+          WHERE agent_id = #{agentId} AND category NOT IN ('care', 'redline')
+          ORDER BY id DESC
+          LIMIT #{limit}
+        ) keep_window
+      )
+  </delete>
+</mapper>
