@@ -1389,13 +1389,8 @@ class ConnectionHandler:
                                     content_type=ContentType.ACTION,
                                 )
                             )
-                            # direct_answer 也是主回答流，同样过安全门；
-                            # 安全门同步改写窗口末条后，记忆后台趟再读窗口
-                            # （被拦截原文不进长期记忆/摘要）
-                            run_safety_gate(self, query)
-                            # 拦截事件回合末排空上报（工单 #9）
-                            flush_interceptions(self)
-                            self._schedule_turn_end_tasks()
+                            # direct_answer 也是主回答流，同样走回合收尾三连
+                            self._finish_turn(query)
                         return
 
                     tool_calls_list = real_tool_calls
@@ -1480,16 +1475,20 @@ class ConnectionHandler:
                     self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
                 )
             )
-            # 儿童模式输出安全门（工单 #8）：主回答流结束后台分类，与 TTS
-            # 合成并行；违规时弃音频、播兜底模板、改写窗口末条。
-            # 先于记忆后台趟执行（同步改写窗口末条），被拦截原文不进
-            # 长期记忆/摘要
-            run_safety_gate(self, query)
-            # 拦截事件回合末排空上报（工单 #9）
-            flush_interceptions(self)
-            self._schedule_turn_end_tasks()
+            self._finish_turn(query)
 
         return True
+
+    def _finish_turn(self, query):
+        """回合收尾三连（depth==0 主回答流结束后）：
+
+        输出安全门（#8，主回答流结束后台分类，与 TTS 合成并行）→ 拦截
+        事件排空上报（#9）→ 记忆后台趟（#7）。安全门同步改写窗口末条后，
+        记忆后台趟再读窗口（被拦截原文不进长期记忆/摘要）。
+        """
+        run_safety_gate(self, query)
+        flush_interceptions(self)
+        self._schedule_turn_end_tasks()
 
     def _schedule_turn_end_tasks(self):
         """回合收尾后台趟（工单 #7）：儿童记忆抽取+20 轮窗口压缩。
