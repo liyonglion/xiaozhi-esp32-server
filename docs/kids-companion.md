@@ -90,3 +90,29 @@ manager-web ──oauth2──> manager-api /agent/kids-memory/*
 curl -H "Authorization: Bearer <server.secret>" \
   http://127.0.0.1:8003/xiaozhi/kids/memory/list
 ```
+
+## 5. fail-open 故障留痕查询
+
+分类通道故障（SLM 槽位未配置/请求异常/输出不可识别）不中断对话：本轮
+放行并留痕。留痕有两处，持久查询以日志为准，进程内列表仅辅助：
+
+- **warning 日志（持久）**：tag `core.kids_safety`，行格式
+  `安全校验失败，本轮放行（fail-open）: <原因>`。同 tag 还有一条
+  `拦截日志 N 条因线程池不可用暂未上报…`，记录连接关闭期未能上报的
+  拦截条数（事件保留在内存，下轮重试）。
+- 进程内列表 `conn.kids_safety_failures`（环形 500 条）：只反映当前
+  连接、重启即失，仅作在线排查辅助，不作为留痕依据。
+
+日志落点为 `log.log_dir` 下的 `server.log`（默认 `tmp/server.log`，
+10MB 轮转、保留 30 天）：
+
+```bash
+# 全部 fail-open 留痕（含故障原因）
+grep "fail-open" tmp/server.log
+
+# 只看安全门通道本身（排除上报故障等同 tag warning）
+grep "core.kids_safety" tmp/server.log | grep "安全校验失败"
+```
+
+命中频次升高通常意味着 SLM 槽位配错或后台小模型服务不可达：先查智能体
+的小模型配置与连通性，再看 `<原因>` 里的具体异常。
