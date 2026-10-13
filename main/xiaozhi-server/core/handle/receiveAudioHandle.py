@@ -13,6 +13,7 @@ from core.handle.sendAudioHandle import send_stt_message, SentenceType
 from core.kids import DEFAULT_AGE_BAND, decide_kids_input
 from core.kids_safety import flush_interceptions, record_interception
 from core.utils.kids_profile import age_band
+from core.utils.output_counter import check_device_output_limit
 
 TAG = __name__
 

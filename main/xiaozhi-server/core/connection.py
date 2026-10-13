@@ -938,6 +938,9 @@ class ConnectionHandler:
         # config.yaml 顶层 kids 同名块 fallback，读取代码两模式通用）
         if private_config.get("kids", None) is not None:
             self.config["kids"] = private_config["kids"]
+            # kids_enabled 在 __init__ 按文件配置算过一次，API 模式块覆盖后
+            # 必须重算，否则输入侧三档门与 KIDS_PERSONA 兜底在主部署模式下失效
+            self.kids_enabled = bool(self.config["kids"].get("enabled", False))
         if private_config.get("device_max_output_size", None) is not None:
             self.max_output_size = int(private_config["device_max_output_size"])
         if private_config.get("chat_history_conf", None) is not None:
