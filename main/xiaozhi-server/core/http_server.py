@@ -1,6 +1,7 @@
 import asyncio
 from aiohttp import web
 from config.logger import setup_logging
+from core.api.kids_memory_handler import KidsMemoryHandler
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
 
@@ -13,6 +14,7 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        self.kids_memory_handler = KidsMemoryHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """获取websocket地址
@@ -71,6 +73,19 @@ class SimpleHttpServer:
                         ),
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
+                        ),
+                        # 儿童长期记忆 HTTP 面（家长页经 manager-api 代理到达，工单 #10）
+                        web.get(
+                            "/xiaozhi/kids/memory/list",
+                            self.kids_memory_handler.handle_list,
+                        ),
+                        web.post(
+                            "/xiaozhi/kids/memory/delete",
+                            self.kids_memory_handler.handle_delete,
+                        ),
+                        web.post(
+                            "/xiaozhi/kids/memory/clear",
+                            self.kids_memory_handler.handle_clear,
                         ),
                     ]
                 )

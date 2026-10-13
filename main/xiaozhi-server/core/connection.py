@@ -988,18 +988,23 @@ class ConnectionHandler:
         if self.memory is None:
             return
         """初始化记忆模块"""
-        self.memory.init_memory(
-            role_id=self.device_id,
-            llm=self.llm,
-            summary_memory=self.config.get("summaryMemory", None),
-            save_to_file=not self.read_config_from_api,
-        )
-
         # 获取记忆总结配置
         memory_config = self.config["Memory"]
         memory_type = self.config["Memory"][self.config["selected_module"]["Memory"]][
             "type"
         ]
+        # mem_kids 自带本地文件存储且不委托 Java 摘要，API 模式也必须
+        # 持久化（跨连接记忆与家长页删除/清除依赖该文件，工单 #10）
+        save_to_file = (
+            True if memory_type == "mem_kids" else not self.read_config_from_api
+        )
+        self.memory.init_memory(
+            role_id=self.device_id,
+            llm=self.llm,
+            summary_memory=self.config.get("summaryMemory", None),
+            save_to_file=save_to_file,
+        )
+
         # 如果使用 nomen 或 mem_report_only，直接返回
         if memory_type == "nomem" or memory_type == "mem_report_only":
             return

@@ -6,8 +6,10 @@
   操作；住址/证件号/电话号码本地硬排除（正则兜底，指令排除之外的保险）。
 - 滚动摘要（L4）：每 20 轮把旧摘要+近窗压成 ≤300 字三要素摘要（事实、
   未完话题、情绪基调），注入 <summary>（【前面聊过的】格式）。
-- 家长页能力：list_memories / delete_memory / clear_memory（HTTP 接口
-  归后续票，本层只提供函数）。
+- 家长页能力：list_memories / delete_memory / clear_memory（实例方法）+
+  模块级 list_for_role / delete_for_role / clear_for_role（HTTP 面经
+  core/api/kids_memory_handler.py 到达，工单 #10：活跃实例优先、文件
+  fallback）。
 
 存储：data/.memory_kids.yaml，按 role_id（device_id）隔离，条目跨连接
 持久；滚动摘要一并持久，跨连接滚动。provider 实例为进程内共享（先例：
@@ -63,10 +65,118 @@ def _is_sensitive(text: str) -> bool:
     return any(p.search(text) for p in SENSITIVE_PATTERNS)
 
 
+# ---- 家长页 HTTP 面支撑（工单 #10）----
+# 活跃实例登记：role_id -> 最近一次 init_memory 的实例。不主动注销——
+# 单家庭下死实例残留无害，同 role 新连接会覆盖登记。
+_INSTANCES: dict = {}
+
+_STORE_PATH = get_project_dir() + "data/.memory_kids.yaml"
+
+
+def _read_role_store(role_id, path=None) -> dict:
+    path = path or _STORE_PATH
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            all_roles = yaml.safe_load(f) or {}
+        return all_roles.get(role_id) or {}
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"读儿童记忆文件失败: {e}")
+        return {}
+
+
+def _write_role_store(role_id, data: dict, path=None) -> None:
+    path = path or _STORE_PATH
+    try:
+        all_roles = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                all_roles = yaml.safe_load(f) or {}
+        all_roles[role_id] = data
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(all_roles, f, allow_unicode=True)
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"写儿童记忆文件失败: {e}")
+
+
+def _read_all_roles(path=None) -> dict:
+    path = path or _STORE_PATH
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.bind(tag=TAG).error(f"读儿童记忆文件失败: {e}")
+        return {}
+
+
+def _newest_role_id(all_roles: dict):
+    """文件里最近活跃的 role（按条目最大 ts）。"""
+
+    def newest_ts(v):
+        return max((e.get("ts", 0) for e in (v or {}).get("entries", [])), default=0)
+
+    return max(all_roles, key=lambda k: newest_ts(all_roles[k]), default=None)
+
+
+def _active_instance(role_id=None):
+    if role_id is not None:
+        return _INSTANCES.get(role_id)
+    # ponytail: 单家庭单孩子设备——无 role 时取最近登记的实例；
+    # 多孩子设备时家长页需带 deviceId 精确定位（HTTP 面预留 role_id 参数）。
+    return next(reversed(list(_INSTANCES.values())), None)
+
+
+def list_for_role(role_id=None) -> list:
+    """家长页列表：优先活跃实例（内存态即时），否则读文件。"""
+    inst = _active_instance(role_id)
+    if inst is not None:
+        return inst.list_memories()
+    if role_id is None:
+        all_roles = _read_all_roles()
+        role_id = _newest_role_id(all_roles)
+        if role_id is None:
+            return []
+    entries = _read_role_store(role_id).get("entries", []) or []
+    return sorted(entries, key=lambda e: e["ts"])
+
+
+def delete_for_role(entry_id: int, role_id=None) -> bool:
+    """家长页逐条删除：走活跃实例（内存/文件同步），否则直改文件。"""
+    inst = _active_instance(role_id)
+    if inst is not None:
+        return inst.delete_memory(entry_id)
+    if role_id is None:
+        role_id = _newest_role_id(_read_all_roles())
+        if role_id is None:
+            return False
+    data = _read_role_store(role_id)
+    entries = [e for e in data.get("entries", []) or [] if e.get("id") != entry_id]
+    removed = len(entries) < len(data.get("entries", []) or [])
+    if removed:
+        _write_role_store(role_id, {"entries": entries, "summary": data.get("summary", "")})
+    return removed
+
+
+def clear_for_role(role_id=None) -> None:
+    """家长页全量清除：条目与滚动摘要一起清（隐私边界）。"""
+    inst = _active_instance(role_id)
+    if inst is not None:
+        inst.clear_memory()
+        return
+    if role_id is None:
+        role_id = _newest_role_id(_read_all_roles())
+        if role_id is None:
+            return
+    _write_role_store(role_id, {"entries": [], "summary": ""})
+
+
 class MemoryProvider(MemoryProviderBase):
     def __init__(self, config, summary_memory):
         super().__init__(config)
-        self.memory_path = get_project_dir() + "data/.memory_kids.yaml"
+        self.memory_path = _STORE_PATH
         self.save_to_file = True
         self.entries = []      # [{id, ts, text}]，ts 升序
         self.summary = ""      # 滚动摘要（L4）
@@ -83,6 +193,8 @@ class MemoryProvider(MemoryProviderBase):
     ):
         super().init_memory(role_id, llm, **kwargs)
         self.save_to_file = save_to_file
+        if role_id is not None:
+            _INSTANCES[role_id] = self
         self.load_memory(summary_memory)
 
     def load_memory(self, summary_memory):
@@ -106,29 +218,16 @@ class MemoryProvider(MemoryProviderBase):
             self._last_ts = max(e["ts"] for e in self.entries)
 
     def _read_store(self) -> dict:
-        if not os.path.exists(self.memory_path):
-            return {}
-        try:
-            with open(self.memory_path, "r", encoding="utf-8") as f:
-                all_roles = yaml.safe_load(f) or {}
-            return all_roles.get(self.role_id) or {}
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"读儿童记忆文件失败: {e}")
-            return {}
+        return _read_role_store(self.role_id, path=self.memory_path)
 
     def _write_store(self):
         if not self.save_to_file:
             return
-        try:
-            all_roles = {}
-            if os.path.exists(self.memory_path):
-                with open(self.memory_path, "r", encoding="utf-8") as f:
-                    all_roles = yaml.safe_load(f) or {}
-            all_roles[self.role_id] = {"entries": self.entries, "summary": self.summary}
-            with open(self.memory_path, "w", encoding="utf-8") as f:
-                yaml.dump(all_roles, f, allow_unicode=True)
-        except Exception as e:
-            logger.bind(tag=TAG).error(f"写儿童记忆文件失败: {e}")
+        _write_role_store(
+            self.role_id,
+            {"entries": self.entries, "summary": self.summary},
+            path=self.memory_path,
+        )
 
     async def query_memory(self, query: str) -> str:
         """L3 注入串：全量条目 ts 升序，id/ts 不进 prompt；空集为空串。"""

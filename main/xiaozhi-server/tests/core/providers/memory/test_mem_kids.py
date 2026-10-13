@@ -367,3 +367,94 @@ def test_compaction_failure_keeps_state_for_retry(tmp_path):
     assert p.get_rolling_summary() == "【前面聊过的】\n重试后的摘要"
     assert len(slm.calls) == 3  # 抽取（空窗口跳过）+ 压缩重试成功
 
+
+# ---- 家长页 HTTP 面底层操作（工单 #10）----
+
+
+def _reset_registry(monkeypatch, tmp_path):
+    """清实例登记并把文件 fallback 指到 tmp（隔离生产 .memory_kids.yaml）。"""
+    import core.providers.memory.mem_kids.mem_kids as m
+
+    m._INSTANCES.clear()
+    monkeypatch.setattr(m, "_STORE_PATH", str(tmp_path / ".memory_kids.yaml"))
+
+
+def test_parent_list_prefers_live_instance(tmp_path, monkeypatch):
+    """有活跃实例（连接在）时走内存态：列表即时反映实例内条目。"""
+    _reset_registry(monkeypatch, tmp_path)
+    from core.providers.memory.mem_kids.mem_kids import list_for_role
+
+    _seed_file(tmp_path, "kid-live", [{"id": 1, "ts": 100, "text": "喜欢恐龙"}])
+    p = MemoryProvider({}, None)
+    p.memory_path = str(tmp_path / ".memory_kids.yaml")
+    p.init_memory(role_id="kid-live", llm=None)  # 登记 _INSTANCES
+
+    assert list_for_role() == [{"id": 1, "ts": 100, "text": "喜欢恐龙"}]
+
+
+def test_parent_list_falls_back_to_file_without_live_instance(tmp_path, monkeypatch):
+    """无活跃实例（服务重启后无连接）时直接读文件，不谎报为空。"""
+    _reset_registry(monkeypatch, tmp_path)
+    from core.providers.memory.mem_kids.mem_kids import list_for_role
+
+    _seed_file(tmp_path, "kid-file", [{"id": 3, "ts": 300, "text": "在上大班"}])
+
+    assert list_for_role() == [{"id": 3, "ts": 300, "text": "在上大班"}]
+
+
+def test_parent_delete_via_live_instance_persists(tmp_path, monkeypatch):
+    """逐条删除经活跃实例：实例内存态与文件一致更新。"""
+    _reset_registry(monkeypatch, tmp_path)
+    from core.providers.memory.mem_kids.mem_kids import delete_for_role
+
+    _seed_file(
+        tmp_path,
+        "kid-del",
+        [
+            {"id": 1, "ts": 100, "text": "喜欢恐龙"},
+            {"id": 2, "ts": 200, "text": "在上大班"},
+        ],
+    )
+    p = MemoryProvider({}, None)
+    p.memory_path = str(tmp_path / ".memory_kids.yaml")
+    p.init_memory(role_id="kid-del", llm=None)
+
+    assert delete_for_role(1) is True
+    assert [e["id"] for e in p.list_memories()] == [2]
+    # 文件同步：重开实例仍在
+    p2 = MemoryProvider({}, None)
+    p2.memory_path = str(tmp_path / ".memory_kids.yaml")
+    p2.init_memory(role_id="kid-del", llm=None)
+    assert [e["id"] for e in p2.list_memories()] == [2]
+
+    assert delete_for_role(99) is False
+
+
+def test_parent_delete_falls_back_to_file(tmp_path, monkeypatch):
+    """无活跃实例时直接改文件。"""
+    _reset_registry(monkeypatch, tmp_path)
+    from core.providers.memory.mem_kids.mem_kids import delete_for_role
+    from core.providers.memory.mem_kids.mem_kids import list_for_role
+
+    _seed_file(tmp_path, "kid-delf", [{"id": 5, "ts": 500, "text": "喜欢积木"}])
+
+    assert delete_for_role(5) is True
+    assert list_for_role() == []
+
+
+def test_parent_clear_removes_entries_and_summary(tmp_path, monkeypatch):
+    """全量清除：条目与滚动摘要一起清（隐私边界）。"""
+    _reset_registry(monkeypatch, tmp_path)
+    from core.providers.memory.mem_kids.mem_kids import clear_for_role
+
+    _seed_file(
+        tmp_path,
+        "kid-clear",
+        [{"id": 1, "ts": 100, "text": "喜欢恐龙"}],
+        summary="孩子喜欢恐龙。",
+    )
+
+    clear_for_role()
+    data = yaml.safe_load((tmp_path / ".memory_kids.yaml").read_text(encoding="utf-8"))
+    assert data["kid-clear"] == {"entries": [], "summary": ""}
+

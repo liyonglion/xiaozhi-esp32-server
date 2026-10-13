@@ -172,6 +172,14 @@ const routes = [
       return import('../views/AddressBookManagement.vue')
     }
   },
+  // 儿童陪伴模式家长页路由
+  {
+    path: '/kids-parent',
+    name: 'KidsParentManagement',
+    component: function () {
+      return import('../views/KidsParentManagement.vue')
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',

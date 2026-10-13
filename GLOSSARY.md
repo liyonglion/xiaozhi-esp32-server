@@ -61,3 +61,12 @@
   与 `birth_ym`（出生年月，`YYYY-MM`）为档案主字段，`personality` /
   `hobbies` / `instructions` / `taboos` 可选。渲染进 L2（小布逐字文案
   契约）；生日缺失/非法退化为无年龄分档。
+- **家长页（parent console page）**：智控台集中家长管理的单页
+  （manager-web `/kids-parent`，工单 #10）——孩子档案编辑（经
+  `PUT /agent/{id}` 落 `kidProfile`，快照通道即时生效）、拦截日志查阅
+  （care/redline 标红）、长期记忆逐条删除与全量清除。
+- **记忆 HTTP 面（memory HTTP surface）**：Python 8003 的儿童记忆端点
+  （`/xiaozhi/kids/memory/list|delete|clear`，Bearer server.auth_key），
+  manager-api 代理 controller（`/agent/kids-memory/*`，oauth2 +
+  智能体归属校验）转发，浏览器不直连小智服务；操作优先走活跃实例
+  （内存态即时），无连接时读改 `data/.memory_kids.yaml` 文件。

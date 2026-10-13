@@ -87,3 +87,52 @@ class TestFileModeFallback:
         assert isinstance(kids, dict), "config.yaml 应含顶层 kids 块"
         assert "enabled" in kids, "kids 块应含 enabled 开关（与 #5 合并语义）"
         assert kids["enabled"] is False, "默认模板不开儿童模式"
+
+
+class TestMemKidsApiModePersistence:
+    """工单 #10：mem_kids 在 API 模式下仍本地持久化（跨连接与家长页删除
+    依赖文件存储；它不像 mem_local_short 那样把摘要委托给 Java）。"""
+
+    @staticmethod
+    def _handler_with_memory(memory_type: str):
+        config = copy.deepcopy(CONFIG)
+        config["read_config_from_api"] = True
+        config["Memory"] = {memory_type: {"type": memory_type}}
+        config["selected_module"]["Memory"] = memory_type
+
+        captured = {}
+
+        class FakeMemory:
+            def init_memory(self, **kwargs):
+                captured.update(kwargs)
+
+            def set_llm(self, llm):
+                pass
+
+        handler = ConnectionHandler(config, None, None, None, FakeMemory(), None)
+        return handler, captured
+
+    def test_mem_kids_keeps_file_persistence_in_api_mode(self):
+        handler, captured = self._handler_with_memory("mem_kids")
+        handler._initialize_memory()
+        assert captured["save_to_file"] is True
+
+    def test_mem_local_short_keeps_api_mode_delegate(self):
+        """Java 委托型 provider 维持原行为（API 模式不落盘）。"""
+        config = copy.deepcopy(CONFIG)
+        config["read_config_from_api"] = True
+        config["Memory"] = {"mem_local_short": {"type": "mem_local_short", "llm": ""}}
+        config["selected_module"]["Memory"] = "mem_local_short"
+
+        captured = {}
+
+        class FakeMemory:
+            def init_memory(self, **kwargs):
+                captured.update(kwargs)
+
+            def set_llm(self, llm):
+                pass
+
+        handler = ConnectionHandler(config, None, None, None, FakeMemory(), None)
+        handler._initialize_memory()
+        assert captured["save_to_file"] is False

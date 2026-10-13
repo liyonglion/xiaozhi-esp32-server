@@ -25,6 +25,18 @@
           }" />
           <span class="nav-text">{{ $t("header.smartManagement") }}</span>
         </div>
+        <!-- 儿童陪伴模式家长页 -->
+        <div class="equipment-management" :class="{
+          'active-tab': $route.path === '/kids-parent',
+        }" @click="handleRouter('kidsParentManagement')">
+          <img loading="lazy" alt="" src="@/assets/header/robot.png" :style="{
+            filter:
+              $route.path === '/kids-parent'
+                ? 'brightness(0) invert(1)'
+                : 'None',
+          }" />
+          <span class="nav-text">{{ $t("header.kidsParent") }}</span>
+        </div>
         <!-- 普通用户显示音色克隆 -->
         <div v-if="!userInfo.superAdmin && featureStatus.voiceClone" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/voice-clone-management' }"
@@ -220,6 +232,7 @@ export default {
         replacementWordManagement: "/replacement-word-management",
         serverSideManagement: "/server-side-management",
         featureManagement: "/feature-management",
+        kidsParentManagement: "/kids-parent",
       }
     };
   },

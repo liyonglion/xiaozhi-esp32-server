@@ -577,4 +577,72 @@ export default {
                 });
             }).send();
     },
+    // 获取智能体拦截日志（儿童模式家长页）
+    getInterceptionLogList(agentId, callback, onTerminalFailure) {
+        const request = RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/interception-log/list/${agentId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                callback(err);
+            })
+            .networkFail((error) => {
+                terminateCallbackRequest(onTerminalFailure, error)
+            })
+        attachTerminalFailure(request, onTerminalFailure).send();
+    },
+    // 获取儿童长期记忆列表（家长页，经 manager-api 代理小智服务）
+    getKidsMemoryList(agentId, callback, onTerminalFailure) {
+        const request = RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/kids-memory/list/${agentId}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                callback(err);
+            })
+            .networkFail((error) => {
+                terminateCallbackRequest(onTerminalFailure, error)
+            })
+        attachTerminalFailure(request, onTerminalFailure).send();
+    },
+    // 逐条删除儿童长期记忆
+    deleteKidsMemory(agentId, entryId, callback, onTerminalFailure) {
+        const request = RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/kids-memory/${agentId}/${entryId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                callback(err);
+            })
+            .networkFail((error) => {
+                terminateCallbackRequest(onTerminalFailure, error)
+            })
+        attachTerminalFailure(request, onTerminalFailure).send();
+    },
+    // 全量清除儿童长期记忆
+    clearKidsMemory(agentId, callback, onTerminalFailure) {
+        const request = RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/kids-memory/clear/${agentId}`)
+            .method('POST')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .fail((err) => {
+                callback(err);
+            })
+            .networkFail((error) => {
+                terminateCallbackRequest(onTerminalFailure, error)
+            })
+        attachTerminalFailure(request, onTerminalFailure).send();
+    },
 }
