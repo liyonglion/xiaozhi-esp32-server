@@ -139,6 +139,8 @@ class ConnectionHandler:
         self.llm = _llm
         self.memory = _memory
         self.intent = _intent
+        # 后台任务小模型（安全分类/记忆抽取/窗口压缩），独立于主对话模型实例
+        self.slm = None
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
@@ -646,6 +648,8 @@ class ConnectionHandler:
             self._initialize_memory()
             """加载意图识别"""
             self._initialize_intent()
+            """加载后台任务小模型（SLM）"""
+            self._initialize_slm()
             """初始化上报线程"""
             self._init_report_threads()
             """更新系统提示词"""
@@ -861,6 +865,11 @@ class ConnectionHandler:
             self.config["selected_module"]["LLM"] = private_config["selected_module"][
                 "LLM"
             ]
+            # SLM 配置随 LLM map 下发（智控台 Agent 的 slmModelId），
+            # 显式消费该键，避免 selected_module 逐键拷贝时被丢弃
+            slm_name = private_config.get("selected_module", {}).get("SLM")
+            if slm_name:
+                self.config["selected_module"]["SLM"] = slm_name
         if private_config.get("VLLM", None) is not None:
             self.config["VLLM"] = private_config["VLLM"]
             self.config["selected_module"]["VLLM"] = private_config["selected_module"][
@@ -1046,6 +1055,34 @@ class ConnectionHandler:
         # 异步初始化工具处理器
         if hasattr(self, "loop") and self.loop:
             asyncio.run_coroutine_threadsafe(self.func_handler._initialize(), self.loop)
+
+    def _initialize_slm(self):
+        """初始化后台任务小模型（SLM，用于安全分类/记忆抽取/窗口压缩）。
+
+        复刻 intent_llm 的第二模型实例模式：selected_module.SLM 指向 LLM
+        配置块中的一个条目，命中则创建独立于主对话模型的实例挂到连接；
+        未配置或配置无效时保持 self.slm 为 None，不影响主对话链路。
+        """
+        slm_name = self.config.get("selected_module", {}).get("SLM")
+        if not slm_name:
+            return
+        slm_config = self.config.get("LLM", {}).get(slm_name)
+        if not slm_config:
+            self.logger.bind(tag=TAG).warning(
+                f"SLM 槽位指向的LLM配置不存在: {slm_name}，跳过小模型初始化"
+            )
+            return
+        try:
+            from core.utils import llm as llm_utils
+
+            slm_type = slm_config.get("type", slm_name)
+            self.slm = llm_utils.create_instance(slm_type, slm_config)
+            self.logger.bind(tag=TAG).info(
+                f"为后台任务创建了专用SLM: {slm_name}, 类型: {slm_type}"
+            )
+        except Exception as e:
+            self.slm = None
+            self.logger.bind(tag=TAG).warning(f"SLM初始化失败，后台任务小模型不可用: {e}")
 
     def change_system_prompt(self, prompt):
         self.prompt = prompt

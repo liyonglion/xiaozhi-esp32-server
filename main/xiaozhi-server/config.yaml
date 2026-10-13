@@ -249,6 +249,11 @@ selected_module:
   # 意图识别可使用function_call，缺点：需要所选择的LLM支持function_call，优点：按需调用工具、速度快，理论上能全部操作所有iot指令
   # 默认免费的ChatGLMLLM就已经支持function_call，但是如果像追求稳定建议把LLM设置成：DoubaoLLM，使用的具体model_name是：doubao-seed-2-0-lite-260215
   Intent: function_call
+  # 后台任务小模型（SLM：安全分类/记忆抽取/窗口压缩用），值为下方 LLM 配置块中的节名
+  # （可复制 AliLLM 一节，把 model_name 换成便宜快档模型，如 qwen-flash）
+  # 不配置则无小模型实例，相关后台任务按各自逻辑退化，不影响主对话链路
+  # 智控台模式下无需在此配置，由 Agent 实体的 slmModelId 随连接下发同名键
+  # SLM: XiaoZhiSLM
 
 # 意图识别，是用于理解用户意图的模块，例如：播放音乐
 Intent:
