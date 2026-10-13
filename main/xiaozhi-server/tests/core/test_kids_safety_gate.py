@@ -297,8 +297,8 @@ def test_fail_open_on_unrecognizable_verdict():
 
 
 def test_topic_slot_prefers_profile_hobby():
-    """槽位来源含档案「爱好」：配置后模板话题用它。"""
-    conn = _make_conn(kids={"enabled": True, "profile": {"爱好": "恐龙"}})
+    """槽位来源含档案「爱好」：配置扁平 hobbies 键（与 kids_profile/下发一致）后模板话题用它。"""
+    conn = _make_conn(kids={"enabled": True, "hobbies": "恐龙"})
     try:
         _run_chat(conn, FakeSLM(verdict="redline"))
         spoken = _spoken_text(conn)

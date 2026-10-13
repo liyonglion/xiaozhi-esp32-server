@@ -146,12 +146,11 @@ def _record_failure(conn, reason):
 
 
 def _pick_topic_for_conn(conn):
-    """连接级槽位取材：记忆条目（#7 的儿童记忆 provider 落地后接入）→ 档案爱好。"""
+    """连接级槽位取材：记忆最新条目 → 档案「爱好」→ 静态兜底词。"""
     kids = conn.config.get("kids") or {}
-    # ponytail: 记忆来源暂缺——工单 #7 的儿童记忆 provider 未落地，
-    # 落地后在此传入其最新条目列表（pick_topic 已支持）
     memory_entries = None
-    profile_hobby = (kids.get("profile") or {}).get("爱好")
+    # 档案「爱好」：扁平 hobbies 键，与 GLOSSARY/kids_profile/manager-api 下发同形
+    profile_hobby = (kids.get("hobbies") or "").strip()
     return pick_topic(memory_entries, profile_hobby)
 
 
