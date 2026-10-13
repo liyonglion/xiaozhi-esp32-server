@@ -45,6 +45,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.kids import KIDS_PERSONA
 
 
 TAG = __name__
@@ -141,6 +142,11 @@ class ConnectionHandler:
         self.intent = _intent
         # 后台任务小模型（安全分类/记忆抽取/窗口压缩），独立于主对话模型实例
         self.slm = None
+
+        # 儿童陪伴模式开关（config.yaml kids.enabled；API 下发通道与档案字段归工单 #6）
+        self.kids_enabled = bool(self.config.get("kids", {}).get("enabled", False))
+        # 输入侧三档决策事件（最近一轮），供输出安全门(#8)/拦截日志(#9)接走，本票不落库
+        self.kids_decision = None
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
@@ -624,6 +630,9 @@ class ConnectionHandler:
             """初始化组件"""
             if self.config.get("prompt") is not None:
                 user_prompt = self.config["prompt"]
+                if self.kids_enabled:
+                    # 儿童模式：快速提示词即儿童人设（增强渲染完成前与失败时的兜底）
+                    user_prompt = KIDS_PERSONA
                 # 使用快速提示词进行初始化
                 prompt = self.prompt_manager.get_quick_prompt(user_prompt)
                 self.change_system_prompt(prompt)

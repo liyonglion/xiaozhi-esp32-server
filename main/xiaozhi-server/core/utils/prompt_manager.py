@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from config.logger import setup_logging
 from jinja2 import Template
+from core.kids import apply_kids_persona
 
 TAG = __name__
 
@@ -301,6 +302,10 @@ class PromptManager:
                 *args,
                 **kwargs,
             )
+            if self.config.get("kids", {}).get("enabled"):
+                # 儿童模式：L1 人设段替换（工单 #5）。替换后再入设备缓存，
+                # 保证缓存内容与实际生效的系统提示词一致
+                enhanced_prompt = apply_kids_persona(enhanced_prompt, self.logger)
             device_cache_key = f"device_prompt:{device_id}"
             self.cache_manager.set(
                 self.CacheType.DEVICE_PROMPT, device_cache_key, enhanced_prompt

@@ -219,6 +219,12 @@ prompt: |
 # 默认系统提示词模板文件
 prompt_template: agent-base-prompt.txt
 
+# 儿童陪伴模式（工单 #5）：开启后 L1 换成儿童人设+安全规则，输入侧三档生效
+# （红线话题→温柔转移；危险行为→阻断+安全提醒；灰色话题→年龄适配）。
+# API 下发通道与孩子档案字段归工单 #6。分层契约见 docs/adr/0001-system-prompt-layering.md
+kids:
+  enabled: false
+
 # 系统错误时的回复
 system_error_response: "主人，小智现在有点忙，我们稍后再试吧。"
 
