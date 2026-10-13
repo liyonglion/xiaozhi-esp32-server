@@ -245,15 +245,21 @@ def flush_interceptions(conn):
     文件模式（未配 manager-api）跳过上报、内存留痕保留；环形 500 条与
     care/redline 豁免挤出语义在 manager-api 持久层（入库后裁剪），Python
     内存列表只做传输。上报失败仅记日志（fail-open，不阻塞对话）。
+    线程池不可用（连接关闭中）时先判后取：告警说明条数并保留事件到下轮
+    重试，绝不静默丢弃。
     """
     if not conn.read_config_from_api or conn.need_bind:
         return
-    events = conn.kids_interceptions
-    if not events:
+    if not conn.kids_interceptions:
         return
-    conn.kids_interceptions = []
     if conn.executor is None:
+        conn.logger.bind(tag=TAG).warning(
+            f"拦截日志 {len(conn.kids_interceptions)} 条因线程池不可用暂未上报，"
+            "已保留在内存待下轮重试"
+        )
         return
+    events = conn.kids_interceptions
+    conn.kids_interceptions = []
 
     def _upload():
         try:

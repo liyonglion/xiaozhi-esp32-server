@@ -103,3 +103,38 @@ def test_file_mode_skips_upload_keeps_local_events(monkeypatch):
         assert uploaded == [], "文件模式不应触发上报"
     finally:
         _teardown(conn)
+
+
+def test_flush_without_executor_warns_and_keeps_events():
+    """线程池不可用（连接关闭中）：绝不静默丢弃——告警说明条数，事件保留待重试。"""
+    from types import SimpleNamespace
+
+    from loguru import logger
+
+    from core.kids_safety import flush_interceptions
+
+    conn = SimpleNamespace(
+        read_config_from_api=True,
+        need_bind=False,
+        executor=None,
+        device_id="dev-flush",
+        kids_interceptions=[
+            {"t": 1.0, "when": "10-13 00:00", "cat": "redline",
+             "user": "u", "reply": None, "actual": "a"},
+            {"t": 2.0, "when": "10-13 00:01", "cat": "danger",
+             "user": "u2", "reply": None, "actual": "a2"},
+        ],
+        logger=logger,
+    )
+
+    messages = []
+    handler_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        flush_interceptions(conn)
+    finally:
+        logger.remove(handler_id)
+
+    assert len(conn.kids_interceptions) == 2, "事件不得被静默丢弃（保留待下轮重试）"
+    assert any("2 条" in m and "拦截" in m for m in messages), (
+        f"应告警未上报条数: {messages}"
+    )
