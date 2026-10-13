@@ -285,7 +285,9 @@ class MemoryProvider(MemoryProviderBase):
             self._compact(messages)
             self._turn_count = 0
         except Exception as e:
-            # 失败退化：摘要/条目/水位不动，下个触发点自然重试
+            # 失败退化：摘要/条目/水位/计数不动，条件仍满足下轮立即重试
+            #（测试钉明契约：SLM 短暂抖动后尽快恢复摘要，代价是故障期每轮
+            # 两次后台 LLM 调用，不阻塞对话）
             logger.bind(tag=TAG).error(f"儿童记忆后台趟失败（下轮重试）: {e}")
 
     # ---- 内部 ----
@@ -362,7 +364,8 @@ class MemoryProvider(MemoryProviderBase):
             if not text or len(text) > MEM_TEXT_MAX:
                 continue
             if _is_sensitive(text):
-                logger.bind(tag=TAG).info(f"拒收敏感记忆条目: {text}")
+                # 原文即被这道闸拦下的 PII（住址/电话/证件号），不得再落日志
+                logger.bind(tag=TAG).info("拒收敏感记忆条目（含住址/电话/证件号等敏感信息）")
                 continue
             if any(e["text"] == text for e in self.entries):
                 continue

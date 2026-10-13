@@ -26,8 +26,8 @@ import xiaozhi.modules.security.user.SecurityUser;
  *
  * <p>
  * 家长页经本端点（oauth2 用户认证 + 智能体归属校验）转发到小智服务
- * Python 8003，浏览器不直连小智服务。单家庭单孩子设备假设下记忆按
- * 活跃实例定位（多孩子设备需扩展 deviceId 透传，见 docs/kids-companion.md）。
+ * Python 8003，浏览器不直连小智服务。记忆按智能体名下设备（mac 即
+ * mem_kids 存储键）精确定位，不落 Python 侧全局回退（防跨家庭越权）。
  *
  * @author lion
  * @version 1.0, 2026/10/13
@@ -51,7 +51,7 @@ public class AgentKidsMemoryController {
     @GetMapping("/list/{agentId}")
     public Result<JsonNode> list(@PathVariable("agentId") String agentId) {
         checkPermission(agentId);
-        return new Result<JsonNode>().ok(agentKidsMemoryService.list());
+        return new Result<JsonNode>().ok(agentKidsMemoryService.list(agentId));
     }
 
     /**
@@ -66,7 +66,7 @@ public class AgentKidsMemoryController {
     public Result<Boolean> delete(@PathVariable("agentId") String agentId,
             @PathVariable("entryId") Long entryId) {
         checkPermission(agentId);
-        return new Result<Boolean>().ok(agentKidsMemoryService.delete(entryId));
+        return new Result<Boolean>().ok(agentKidsMemoryService.delete(agentId, entryId));
     }
 
     /**
@@ -79,13 +79,13 @@ public class AgentKidsMemoryController {
     @PostMapping("/clear/{agentId}")
     public Result<Boolean> clear(@PathVariable("agentId") String agentId) {
         checkPermission(agentId);
-        return new Result<Boolean>().ok(agentKidsMemoryService.clear());
+        return new Result<Boolean>().ok(agentKidsMemoryService.clear(agentId));
     }
 
     private void checkPermission(String agentId) {
         UserDetail user = SecurityUser.getUser();
         if (!agentService.checkAgentPermission(agentId, user.getId())) {
-            throw new RenException(ErrorCode.CHAT_HISTORY_NO_PERMISSION);
+            throw new RenException(ErrorCode.NO_PERMISSION);
         }
     }
 }
