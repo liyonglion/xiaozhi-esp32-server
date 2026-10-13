@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS `ai_agent_interception_log` (
     `model_reply` TEXT NULL COMMENT '模型原回复',
     `actual_reply` TEXT NULL COMMENT '孩子实际听到的内容',
     `occurred_at` DATETIME NOT NULL COMMENT '拦截发生时间（Python 侧事件时间戳）',
-    `created_at` DATETIME DEFAULT NULL COMMENT '创建时间',
-    `updated_at` DATETIME DEFAULT NULL COMMENT '更新时间',
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `idx_agent_category_id` (`agent_id`, `category`, `id`)
+    KEY `idx_agent_category_id` (`agent_id`, `category`, `id`),
+    KEY `idx_agent_occurred_id` (`agent_id`, `occurred_at`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='儿童陪伴模式拦截日志表';
