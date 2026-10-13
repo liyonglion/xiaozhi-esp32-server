@@ -365,6 +365,12 @@ Memory:
     # 如果这里不填，则会默认使用selected_module.LLM的模型作为意图识别的思考模型
     # 如果你的不想使用selected_module.LLM记忆存储，这里最好使用独立的LLM作为意图识别，例如使用免费的ChatGLMLLM
     llm: ChatGLMLLM
+  mem_kids:
+    # 儿童陪伴长期记忆（工单 #7，对齐小布 L3/L4 规则）：条目列表（≤100 条，
+    # ts 升序注入 <memory>）+ 每 20 轮压缩的 ≤300 字滚动摘要（注入 <summary>）；
+    # 抽取/压缩优先走 selected_module.SLM 槽位的小模型，住址/证件号/电话硬排除。
+    # 数据存本地 data/.memory_kids.yaml，按设备隔离；家长页删除接口归后续票。
+    type: mem_kids
 
 ASR:
   FunASR:

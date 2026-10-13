@@ -31,6 +31,7 @@ from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
 from concurrent.futures import ThreadPoolExecutor
 from core.utils.dialogue import Message, Dialogue
+from core.kids_safety import run_safety_gate
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
@@ -142,6 +143,10 @@ class ConnectionHandler:
         self.intent = _intent
         # 后台任务小模型（安全分类/记忆抽取/窗口压缩），独立于主对话模型实例
         self.slm = None
+        # 儿童模式输出安全门状态（工单 #8）：连拦计数与拦截事件随连接生命周期
+        self.kids_block_streak = 0
+        self.kids_interceptions = []  # 拦截事件（统一 dict 结构；落库归 #9）
+        self.kids_safety_failures = []  # fail-open 故障留痕
 
         # 儿童陪伴模式开关（config.yaml kids.enabled；API 下发通道与档案字段归工单 #6）
         self.kids_enabled = bool(self.config.get("kids", {}).get("enabled", False))
@@ -653,12 +658,12 @@ class ConnectionHandler:
                 self.asr.open_audio_channels(self), self.loop
             )
 
+            """加载后台任务小模型（SLM，先于记忆：儿童记忆抽取/压缩优先用 SLM）"""
+            self._initialize_slm()
             """加载记忆"""
             self._initialize_memory()
             """加载意图识别"""
             self._initialize_intent()
-            """加载后台任务小模型（SLM）"""
-            self._initialize_slm()
             """初始化上报线程"""
             self._init_report_threads()
             """更新系统提示词"""
@@ -993,6 +998,16 @@ class ConnectionHandler:
         # 如果使用 nomen 或 mem_report_only，直接返回
         if memory_type == "nomem" or memory_type == "mem_report_only":
             return
+        # 使用 mem_kids 模式（工单 #7：儿童长期记忆+滚动摘要）
+        elif memory_type == "mem_kids":
+            # 抽取/压缩优先走 SLM 槽位（conn.slm，#2 已挂到连接），
+            # 未配置 SLM 时退化用主 LLM，不占主对话模型的原则尽量保持
+            if self.slm is not None:
+                self.memory.set_llm(self.slm)
+                self.logger.bind(tag=TAG).info("儿童记忆抽取/压缩使用SLM槽位")
+            else:
+                self.memory.set_llm(self.llm)
+                self.logger.bind(tag=TAG).info("儿童记忆抽取/压缩退化使用主LLM")
         # 使用 mem_local_short 模式
         elif memory_type == "mem_local_short":
             memory_llm_name = memory_config[self.config["selected_module"]["Memory"]][
@@ -1157,12 +1172,17 @@ class ConnectionHandler:
         try:
             # 使用带记忆的对话
             memory_str = None
+            summary_str = None
             # 仅当query非空（代表用户询问）时查询记忆
             if self.memory is not None and query:
                 future = asyncio.run_coroutine_threadsafe(
                     self.memory.query_memory(query), self.loop
                 )
                 memory_str = future.result()
+                # L4 滚动摘要（工单 #7：儿童记忆 provider 提供；其它 provider 无此方法）
+                get_summary = getattr(self.memory, "get_rolling_summary", None)
+                if callable(get_summary):
+                    summary_str = get_summary()
 
             # 仅在该说话人首次出现时把身份注入 system，之后靠对话历史首轮保留，
             # 避免每轮在 system 重复出现名字诱导模型反复称呼
@@ -1177,7 +1197,8 @@ class ConnectionHandler:
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
                     self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
+                        memory_str, self.config.get("voiceprint", {}), speaker_for_system,
+                        summary_str,
                     ),
                     functions=functions,
                 )
@@ -1185,7 +1206,8 @@ class ConnectionHandler:
                 llm_responses = self.llm.response(
                     self.session_id,
                     self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
+                        memory_str, self.config.get("voiceprint", {}), speaker_for_system,
+                        summary_str,
                     ),
                 )
         except Exception as e:
@@ -1353,6 +1375,11 @@ class ConnectionHandler:
                                     content_type=ContentType.ACTION,
                                 )
                             )
+                            # direct_answer 也是主回答流，同样过安全门；
+                            # 安全门同步改写窗口末条后，记忆后台趟再读窗口
+                            # （被拦截原文不进长期记忆/摘要）
+                            run_safety_gate(self, query)
+                            self._schedule_turn_end_tasks()
                         return
 
                     tool_calls_list = real_tool_calls
@@ -1437,8 +1464,30 @@ class ConnectionHandler:
                     self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
                 )
             )
+            # 儿童模式输出安全门（工单 #8）：主回答流结束后台分类，与 TTS
+            # 合成并行；违规时弃音频、播兜底模板、改写窗口末条。
+            # 先于记忆后台趟执行（同步改写窗口末条），被拦截原文不进
+            # 长期记忆/摘要
+            run_safety_gate(self, query)
+            self._schedule_turn_end_tasks()
 
         return True
+
+    def _schedule_turn_end_tasks(self):
+        """回合收尾后台趟（工单 #7）：儿童记忆抽取+20 轮窗口压缩。
+
+        duck-type 探测 memory provider 的 on_turn_end（仅儿童记忆 provider
+        提供）；无此能力的 provider 为 no-op，非儿童模式行为不变。失败由
+        provider 自行兜住（退化走现有行为），不占主对话模型（走 conn.slm）。
+        """
+        on_turn_end = getattr(self.memory, "on_turn_end", None)
+        if callable(on_turn_end):
+            try:
+                self.executor.submit(on_turn_end, self.dialogue.dialogue)
+            except RuntimeError as e:
+                # 连接正在关闭、线程池已停：本轮后台趟放弃，抽取留到连接
+                # 关闭时的 save_memory 触发点兜底
+                self.logger.bind(tag=TAG).debug(f"回合收尾后台趟未提交（连接关闭中）: {e}")
 
     def _handle_function_result(self, tool_results, depth, streamed_text=""):
         need_llm_tools = []

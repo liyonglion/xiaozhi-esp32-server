@@ -73,6 +73,34 @@ async def test_get_llm_dialogue_with_memory_substitutes_into_system_message():
 
 
 @pytest.mark.asyncio
+async def test_get_llm_dialogue_with_summary_substitutes_into_system_message():
+    """L4 滚动摘要注入：<summary> 标签替换（ADR-0001 L4 挂点，工单 #7）。"""
+    d = Dialogue()
+    d.update_system_message(
+        "<layer-3-memory><memory></memory></layer-3-memory>"
+        "<layer-4-summary><summary></summary></layer-4-summary>"
+    )
+    msgs = d.get_llm_dialogue_with_memory(summary_str="【前面聊过的】\n孩子喜欢恐龙")
+    system = next(m for m in msgs if m["role"] == "system")
+    content = system["content"]
+    assert "孩子喜欢恐龙" in content
+    assert "<summary></summary>" not in content
+    # 注入落在 L4 边界内、L3 边界外
+    assert content.index("</layer-3-memory>") < content.index("孩子喜欢恐龙")
+    assert content.index("孩子喜欢恐龙") < content.index("</layer-4-summary>")
+
+
+@pytest.mark.asyncio
+async def test_get_llm_dialogue_without_summary_leaves_tag_untouched():
+    """未传摘要（非儿童/无摘要）：模板原样保留，行为不变。"""
+    d = Dialogue()
+    d.update_system_message("<layer-4-summary><summary></summary></layer-4-summary>")
+    msgs = d.get_llm_dialogue_with_memory()
+    system = next(m for m in msgs if m["role"] == "system")
+    assert "<summary></summary>" in system["content"]
+
+
+@pytest.mark.asyncio
 async def test_get_llm_dialogue_separates_temporary_few_shot_from_actual_history():
     d = Dialogue()
     d.put(Message(role="user", content="real user msg", is_temporary=False))
