@@ -29,6 +29,14 @@ from datetime import datetime
 
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 
+# 红线/危险话术与兜底话题与输入侧三档（core.kids）同源：小布 TPL_* 逐字，
+# 单一样本源，输入侧（#5）与输出侧（#8）共用
+from core.kids import (
+    DANGER_TEMPLATES as TPL_DANGER,
+    REDLINE_TEMPLATES as TPL_REDLINE,
+    FALLBACK_TOPICS,
+)
+
 TAG = __name__
 
 # 分类指令（静态文本：每趟校验前缀稳定，缓存友好）。只审回答本身；care 由
@@ -56,14 +64,6 @@ TPL_CARE = (
     "这件事太大啦，一定要让爸爸妈妈知道。我答应不了保密，"
     "但我会一直陪着你，去拉拉妈妈的手好不好？",
 )
-TPL_REDLINE = (
-    "咦，这个我还真不知道呢。我们聊聊{topic}好不好？",
-    "哎呀，这个我也不知道呀。要不我们说说{topic}？",
-)
-TPL_DANGER = (
-    "这个不可以哦，会受伤的，要保护好自己。我们说点{topic}吧！",
-    "不可以这样做，太危险啦！要平平安安的。来，聊聊{topic}？",
-)
 TPL_PRIVACY = (
     "这个呀，要问过爸爸妈妈才能说哦。我们还是聊聊{topic}吧！",
     "这个要爸爸妈妈才能回答哦。来，说说{topic}？",
@@ -79,8 +79,6 @@ TPL_ACTIVITY = (
     "要不要听听{topic}的儿歌呀？",
 )
 
-# 转移话题兜底词（无记忆无档案时槽位也永不落空）
-FALLBACK_TOPICS = ("小动物", "好吃的点心", "好玩的玩具", "天上的云")
 
 # 类别 → 兜底模板组（单张表，避免类别判断散落多处）
 SAFETY_TPLS = {
