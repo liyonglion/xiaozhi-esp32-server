@@ -302,13 +302,8 @@ class MemoryProvider(MemoryProviderBase):
             pass
         return content or ""
 
-    def _extract(self, messages) -> None:
-        """对未抽取窗口跑一次 LLM 记忆抽取并应用操作；成功才推进水位。"""
-        if self.llm is None:
-            return
-        window = self._window(messages, self._extracted_upto)
-        if not window:
-            return
+    def _build_dialogue_lines(self, window) -> list:
+        """抽取/压缩共用材料头：【旧摘要】（有则）+【对话记录】行（孩子/小智）。"""
         lines = []
         if self.summary:
             lines.append(f"【旧摘要】\n{self.summary}\n")
@@ -316,6 +311,16 @@ class MemoryProvider(MemoryProviderBase):
         for m in window:
             who = "孩子" if m.role == "user" else "小智"
             lines.append(f"{who}：{self._plain_content(m.content)}")
+        return lines
+
+    def _extract(self, messages) -> None:
+        """对未抽取窗口跑一次 LLM 记忆抽取并应用操作；成功才推进水位。"""
+        if self.llm is None:
+            return
+        window = self._window(messages, self._extracted_upto)
+        if not window:
+            return
+        lines = self._build_dialogue_lines(window)
         lines.append("【现有记忆】")
         if self.entries:
             lines += [f"{e['id']}. {e['text']}" for e in self.entries]
@@ -378,13 +383,7 @@ class MemoryProvider(MemoryProviderBase):
         window = self._window(messages, self._compacted_upto)
         if not window:
             return
-        lines = []
-        if self.summary:
-            lines.append(f"【旧摘要】\n{self.summary}\n")
-        lines.append("【对话记录】")
-        for m in window:
-            who = "孩子" if m.role == "user" else "小智"
-            lines.append(f"{who}：{self._plain_content(m.content)}")
+        lines = self._build_dialogue_lines(window)
 
         result = self.llm.response_no_stream(
             COMPACT_INSTR, "\n".join(lines), max_tokens=800, temperature=0.2
