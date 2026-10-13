@@ -226,8 +226,16 @@ def record_interception(conn, cat, user_text, reply_text, actual_text):
     )
 
 
-def _safety_block(conn, cat, user_text, reply_text, assistant_msg):
-    """拦截动作：弃音频换模板 + 改写窗口 + 记拦截事件。"""
+def _safety_block(conn, cat, user_text, reply_text, assistant_msg, audited_sid=None):
+    """拦截动作：弃音频换模板 + 改写窗口 + 记拦截事件。
+
+    SLM 分类是秒级网络往返，期间孩子可能打断开启新回合：sentence_id 已
+    前移时只记拦截事件（上报链路保留），不动新回合的音频与队列。
+    """
+    if audited_sid is not None and conn.sentence_id != audited_sid:
+        conn.logger.bind(tag=TAG).warning("安全门结果已过时（新回合已开始），只记事件不动音频")
+        record_interception(conn, cat, user_text, reply_text, reply_text)
+        return
     topic = _pick_topic_for_conn(conn)
     tpl = render_tpl(random.choice(SAFETY_TPLS.get(cat, TPL_PROFANITY)), topic)
     if cat == "care":
@@ -286,6 +294,8 @@ def run_safety_gate(conn, user_text):
     """
     if not (conn.config.get("kids") or {}).get("enabled"):
         return
+    # 受审回合标识：SLM 返回若已跨回合（打断），拦截只记事件不动音频
+    audited_sid = conn.sentence_id
     assistant_msg = next(
         (m for m in reversed(conn.dialogue.dialogue) if m.role == "assistant"), None
     )
@@ -312,4 +322,4 @@ def run_safety_gate(conn, user_text):
     if cat == "safe":
         conn.kids_block_streak = 0
         return
-    _safety_block(conn, cat, user_text, reply_text, assistant_msg)
+    _safety_block(conn, cat, user_text, reply_text, assistant_msg, audited_sid)

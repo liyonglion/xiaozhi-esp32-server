@@ -112,11 +112,13 @@ class Dialogue:
                 "{{current_time}}", datetime.now().strftime("%H:%M")
             )
 
-            # 填充孩子档案（L2；年龄段随生日每轮重算，见 core/utils/kids_profile.py）
+            # 填充孩子档案（L2；年龄段随生日每轮重算，见 core/utils/kids_profile.py）。
+            # lambda 形式：档案是家长自由输入，含 \1 \g 等序列时作为 replacement
+            # 模板会抛 re.error（bad escape），当纯文本填入
             if kids_profile_str:
                 full_prompt = re.sub(
                     r"<kids_profile>.*?</kids_profile>",
-                    f"<kids_profile>\n{kids_profile_str}\n</kids_profile>",
+                    lambda _m: f"<kids_profile>\n{kids_profile_str}\n</kids_profile>",
                     full_prompt,
                     flags=re.DOTALL,
                 )
