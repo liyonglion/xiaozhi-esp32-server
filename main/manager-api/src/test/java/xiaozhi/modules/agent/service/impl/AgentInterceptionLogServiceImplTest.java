@@ -103,6 +103,7 @@ class AgentInterceptionLogServiceImplTest {
         String sql = captor.getValue().getSqlSegment();
         assertTrue(sql.contains("agent_id ="), "应按智能体过滤: " + sql);
         assertTrue(sql.contains("ORDER BY occurred_at DESC"), "应按时间倒序: " + sql);
+        assertTrue(sql.contains("LIMIT 1000"), "应带上限（care/redline 豁免不受环形窗口约束，防无界查询）: " + sql);
 
         assertEquals(1, result.size());
         AgentInterceptionLogVO vo = result.get(0);

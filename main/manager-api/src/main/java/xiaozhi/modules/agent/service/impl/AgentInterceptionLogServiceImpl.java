@@ -36,6 +36,12 @@ public class AgentInterceptionLogServiceImpl implements AgentInterceptionLogServ
      */
     static final int RING_LIMIT = 500;
 
+    /**
+     * 查询上限：豁免类不受环形窗口约束，日志可无界增长，查询取最新
+     * 1000 条防一次拉全表
+     */
+    static final int LIST_LIMIT = 1000;
+
     private final AgentService agentService;
     private final AgentInterceptionLogDao agentInterceptionLogDao;
 
@@ -72,10 +78,12 @@ public class AgentInterceptionLogServiceImpl implements AgentInterceptionLogServ
     @Override
     public List<AgentInterceptionLogVO> listByAgentId(String agentId) {
         QueryWrapper<AgentInterceptionLogEntity> wrapper = new QueryWrapper<>();
-        // 时间倒序（id 作同秒内稳定次序键）；环形窗口限定结果规模
+        // 时间倒序（id 作同秒内稳定次序键）取最新 LIST_LIMIT 条；
+        // care/redline 豁免环形挤出，无 LIMIT 会随日志无界增长拉全表
         wrapper.eq("agent_id", agentId)
                 .orderByDesc("occurred_at")
-                .orderByDesc("id");
+                .orderByDesc("id")
+                .last("LIMIT " + LIST_LIMIT);
         List<AgentInterceptionLogEntity> entities = agentInterceptionLogDao.selectList(wrapper);
         return ConvertUtils.sourceToTarget(entities, AgentInterceptionLogVO.class);
     }
