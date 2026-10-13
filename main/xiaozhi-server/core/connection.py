@@ -31,6 +31,7 @@ from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
 from concurrent.futures import ThreadPoolExecutor
 from core.utils.dialogue import Message, Dialogue
+from core.utils.kids_profile import render_kids_profile
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
@@ -919,6 +920,10 @@ class ConnectionHandler:
             self.config["voiceprint"] = private_config["voiceprint"]
         if private_config.get("summaryMemory", None) is not None:
             self.config["summaryMemory"] = private_config["summaryMemory"]
+        # 孩子档案（儿童模式开关+档案统一 per-agent 下发；文件模式由
+        # config.yaml 顶层 kids 同名块 fallback，读取代码两模式通用）
+        if private_config.get("kids", None) is not None:
+            self.config["kids"] = private_config["kids"]
         if private_config.get("device_max_output_size", None) is not None:
             self.max_output_size = int(private_config["device_max_output_size"])
         if private_config.get("chat_history_conf", None) is not None:
@@ -1143,6 +1148,10 @@ class ConnectionHandler:
             if functions is not None and depth == 0:
                 functions.append(DIRECT_ANSWER_TOOL)
 
+        # 孩子档案（L2）：每轮按当前年月重算年龄段渲染，过生日自动升档；
+        # 生日缺失/非法或未开 kids 时 render 返回空串，空层跳过
+        kids_profile_str = render_kids_profile(self.config.get("kids"))
+
         response_message = []
 
         try:
@@ -1168,7 +1177,8 @@ class ConnectionHandler:
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
                     self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
+                        memory_str, self.config.get("voiceprint", {}), speaker_for_system,
+                        kids_profile_str,
                     ),
                     functions=functions,
                 )
@@ -1176,7 +1186,8 @@ class ConnectionHandler:
                 llm_responses = self.llm.response(
                     self.session_id,
                     self.dialogue.get_llm_dialogue_with_memory(
-                        memory_str, self.config.get("voiceprint", {}), speaker_for_system
+                        memory_str, self.config.get("voiceprint", {}), speaker_for_system,
+                        kids_profile_str,
                     ),
                 )
         except Exception as e:
