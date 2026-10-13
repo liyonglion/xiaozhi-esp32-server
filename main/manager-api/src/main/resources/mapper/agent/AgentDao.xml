@@ -28,6 +28,7 @@
         <result column="chatHistoryConf" property="chatHistoryConf"/>
         <result column="systemPrompt" property="systemPrompt"/>
         <result column="summaryMemory" property="summaryMemory"/>
+        <result column="kidProfile" property="kidProfile"/>
         <result column="langCode" property="langCode"/>
         <result column="language" property="language"/>
         <result column="sort" property="sort"/>
@@ -65,6 +66,7 @@
                a.chat_history_conf AS chatHistoryConf,
                a.system_prompt     AS systemPrompt,
                a.summary_memory    AS summaryMemory,
+               a.kid_profile       AS kidProfile,
                a.lang_code         AS langCode,
                a.language          AS language,
                a.sort,
@@ -109,6 +111,7 @@
             chat_history_conf = #{agent.chatHistoryConf,jdbcType=INTEGER},
             system_prompt = #{agent.systemPrompt,jdbcType=LONGVARCHAR},
             summary_memory = #{agent.summaryMemory,jdbcType=LONGVARCHAR},
+            kid_profile = #{agent.kidProfile,jdbcType=LONGVARCHAR},
             lang_code = #{agent.langCode,jdbcType=VARCHAR},
             language = #{agent.language,jdbcType=VARCHAR},
             sort = #{agent.sort,jdbcType=INTEGER},

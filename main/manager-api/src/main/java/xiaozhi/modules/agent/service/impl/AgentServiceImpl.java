@@ -432,6 +432,9 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         if (dto.getSummaryMemory() != null) {
             existingEntity.setSummaryMemory(dto.getSummaryMemory());
         }
+        if (dto.getKidProfile() != null) {
+            existingEntity.setKidProfile(dto.getKidProfile());
+        }
         if (dto.getChatHistoryConf() != null) {
             existingEntity.setChatHistoryConf(dto.getChatHistoryConf());
         }

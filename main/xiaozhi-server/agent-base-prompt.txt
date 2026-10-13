@@ -72,6 +72,8 @@ For the input format `{"speaker":"...", "content":"..."}` (speaker = speaker nam
 </layer-1-persona>
 
 <layer-2-profile>
+<kids_profile>
+</kids_profile>
 <context>
 [Important: The following info is provided in real time — use it directly, no tool calls needed]
 - Current time: {{current_time}}

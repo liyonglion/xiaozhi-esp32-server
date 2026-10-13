@@ -47,4 +47,14 @@
   部分计价折扣；分层排序的服务对象。
 - **滚动摘要（rolling summary）**：见 L4。
 - **年龄档位（age band）**：按出生年月计算的对话深浅档位（如 3-5 岁 /
-  6-8 岁 / 9 岁以上），驱动灰区话题分寸；硬红线不随档位变化。
+  6-8 岁 / 9 岁以上），驱动灰区话题分寸；硬红线不随档位变化。月粒度
+  满岁（生日月即满岁），每轮按当前年月重算；纯函数在
+  `main/xiaozhi-server/core/utils/kids_profile.py`（`age_band`）。
+- **kids 块（kids block）**：儿童模式统一配置块——`enabled` 开关加档案
+  子字段并存。API 模式经智控台 Agent 的 `kidProfile` JSON 字段随
+  per-agent 配置下发（下发键名 `kids`），文件模式由 config.yaml 顶层
+  `kids` 同名块 fallback，Python 端同一读取代码（`self.config["kids"]`）。
+- **孩子档案（kid profile）**：kids 块的档案子字段——`nickname`（称呼）
+  与 `birth_ym`（出生年月，`YYYY-MM`）为档案主字段，`personality` /
+  `hobbies` / `instructions` / `taboos` 可选。渲染进 L2（小布逐字文案
+  契约）；生日缺失/非法退化为无年龄分档。
