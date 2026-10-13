@@ -4,7 +4,7 @@
 行为：TTS 队列收到的文本、对话窗口的改写、拦截事件结构、fail-open 故障
 注入后的放行。provider 接口契约先例：tests/core/test_prompt_layers.py。
 
-安全门契约（小布 accompany 移植，工单 #8）：
+安全门契约（小布（源工程）accompany 移植，工单 #8）：
     主回答流结束后用 conn.slm 做六类后台分类（care/redline/danger/
     privacy/profanity/safe）；违规时丢弃已排队音频、播放含话题槽的儿童
     话术模板、改写窗口末条 assistant 消息；care 不计连拦；连拦 3 次后
@@ -189,7 +189,7 @@ def test_bypass_completely_when_kids_disabled():
 
 
 def test_classification_prompt_contract():
-    """SLM 收到逐字移植的分类指令与【孩子说的】/【小布回答的】节结构。"""
+    """SLM 收到逐字移植的分类指令与【孩子说的】/【小智回答的】节结构。"""
     from core.kids_safety import SAFETY_INSTR
 
     conn = _make_conn(kids={"enabled": True})
@@ -200,7 +200,7 @@ def test_classification_prompt_contract():
         system_prompt, user_prompt = slm.calls[0]
         assert system_prompt == SAFETY_INSTR
         assert user_prompt == (
-            "【孩子说的】\n给我讲个鬼故事\n【小布回答的】\n" + MODEL_REPLY
+            "【孩子说的】\n给我讲个鬼故事\n【小智回答的】\n" + MODEL_REPLY
         )
     finally:
         _teardown(conn)

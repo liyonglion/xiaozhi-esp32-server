@@ -124,8 +124,8 @@ def test_chat_injects_kids_memory_and_summary_into_layers(tmp_path):
         conn.chat("你好")
         content = _system_content(conn)
 
-        assert content.index("<layer-3-memory>") < content.index("【小布记住的事】")
-        assert content.index("【小布记住的事】") < content.index("</layer-3-memory>")
+        assert content.index("<layer-3-memory>") < content.index("【小智记住的事】")
+        assert content.index("【小智记住的事】") < content.index("</layer-3-memory>")
         assert content.index("</layer-3-memory>") < content.index("【前面聊过的】")
         assert content.index("【前面聊过的】") < content.index("</layer-4-summary>")
         assert "喜欢恐龙" in content

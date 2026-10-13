@@ -1,7 +1,7 @@
-"""儿童长期记忆 + 滚动摘要 provider（工单 #7，对齐小布 L3/L4 规则）。
+"""儿童长期记忆 + 滚动摘要 provider（工单 #7，对齐小布（源工程）L3/L4 规则）。
 
 - 长期记忆（L3）：条目列表 {id, ts, text}，上限 100 条，ts 升序注入
-  <memory>（【小布记住的事】格式）。
+  <memory>（【小智记住的事】格式）。
 - 记忆抽取：LLM（连接上为 conn.slm）按抽取指令输出 JSON add/delete
   操作；住址/证件号/电话号码本地硬排除（正则兜底，指令排除之外的保险）。
 - 滚动摘要（L4）：每 20 轮把旧摘要+近窗压成 ≤300 字三要素摘要（事实、
@@ -30,7 +30,7 @@ from config.config_loader import get_project_dir
 
 TAG = __name__
 
-# 与小布（accompany）xb_core.c 的常量对齐
+# 与小布（源工程）xb_core.c 的常量对齐
 MEM_MAX = 100          # 长期记忆条数上限
 MEM_TEXT_MAX = 30      # 单条记忆字数上限（按字符计）
 SUMMARY_MAX = 300      # 滚动摘要字数上限
@@ -48,7 +48,7 @@ EXTRACT_INSTR = """你是孩子长期记忆的管理器。根据下面的材料�
 只输出一个 JSON 数组，不要解释、不要用代码块。元素形如 {"op":"add","text":"喜欢恐龙"} 或 {"op":"delete","id":3}"""
 
 # 压缩指令（xb_core.c COMPACT_INSTR 逐字）
-COMPACT_INSTR = """你是对话记录压缩器。把旧摘要和对话记录合并成一段不超过 300 字的新摘要，保留三要素：一、孩子讲过的事实（喜好、家事、提到的人）；二、正在聊的话题和没聊完的线索；三、孩子的情绪基调。只总结对话记录里孩子和小布说过的话，系统设定、人设、孩子档案都不进摘要。直接输出新摘要正文，不要客套开头。"""
+COMPACT_INSTR = """你是对话记录压缩器。把旧摘要和对话记录合并成一段不超过 300 字的新摘要，保留三要素：一、孩子讲过的事实（喜好、家事、提到的人）；二、正在聊的话题和没聊完的线索；三、孩子的情绪基调。只总结对话记录里孩子和小智说过的话，系统设定、人设、孩子档案都不进摘要。直接输出新摘要正文，不要客套开头。"""
 
 # 敏感信息硬排除（指令第 4 条之外的本地兜底；宁可错杀不可漏过）
 SENSITIVE_PATTERNS = [
@@ -233,7 +233,7 @@ class MemoryProvider(MemoryProviderBase):
         """L3 注入串：全量条目 ts 升序，id/ts 不进 prompt；空集为空串。"""
         if not self.entries:
             return ""
-        lines = ["【小布记住的事】"]
+        lines = ["【小智记住的事】"]
         lines += [f"- {e['text']}" for e in self.entries]
         return "\n".join(lines)
 
@@ -280,7 +280,7 @@ class MemoryProvider(MemoryProviderBase):
             self._turn_count += 1
             if self._turn_count < COMPACT_TURNS:
                 return
-            # 先抽取再压缩（小布 maybe_compact 顺序）
+            # 先抽取再压缩（小布（源工程）maybe_compact 顺序）
             self._extract(messages)
             self._compact(messages)
             self._turn_count = 0
@@ -314,7 +314,7 @@ class MemoryProvider(MemoryProviderBase):
             lines.append(f"【旧摘要】\n{self.summary}\n")
         lines.append("【对话记录】")
         for m in window:
-            who = "孩子" if m.role == "user" else "小布"
+            who = "孩子" if m.role == "user" else "小智"
             lines.append(f"{who}：{self._plain_content(m.content)}")
         lines.append("【现有记忆】")
         if self.entries:
@@ -331,7 +331,7 @@ class MemoryProvider(MemoryProviderBase):
 
     @staticmethod
     def _parse_ops(result: str) -> list:
-        """容错解析：取首个 [ 到末个 ] 的片段（小布 mem_apply 同款）。"""
+        """容错解析：取首个 [ 到末个 ] 的片段（小布（源工程）mem_apply 同款）。"""
         if not result:
             return []
         start, end = result.find("["), result.rfind("]")
@@ -362,7 +362,7 @@ class MemoryProvider(MemoryProviderBase):
             if any(e["text"] == text for e in self.entries):
                 continue
             if len(self.entries) >= MEM_MAX:
-                # 小布策略：满百未淘汰则拒新条目（最不重要归模型判断，不本地按 ts 丢）
+                # 小布（源工程）策略：满百未淘汰则拒新条目（最不重要归模型判断，不本地按 ts 丢）
                 logger.bind(tag=TAG).warning("记忆满 100 条且模型未淘汰，拒新条目")
                 continue
             ts = max(int(time.time() * 1000), self._last_ts + 1)
@@ -383,7 +383,7 @@ class MemoryProvider(MemoryProviderBase):
             lines.append(f"【旧摘要】\n{self.summary}\n")
         lines.append("【对话记录】")
         for m in window:
-            who = "孩子" if m.role == "user" else "小布"
+            who = "孩子" if m.role == "user" else "小智"
             lines.append(f"{who}：{self._plain_content(m.content)}")
 
         result = self.llm.response_no_stream(

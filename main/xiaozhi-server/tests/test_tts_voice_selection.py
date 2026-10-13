@@ -6,7 +6,7 @@
 - aliyun（sambert 非流式 NLS）：seam = text_to_speak 发出的 HTTP 请求体。
 
 预期值来源（独立事实源，勿从实现反推）：
-- 小布参考设计 core/src/xb_core.c：cosyvoice-v2 + longhuhu + PlainText + pcm，
+- 小布（源工程）参考设计 core/src/xb_core.c：cosyvoice-v2 + longhuhu + PlainText + pcm，
   v3/v3.5 引擎对 longhuhu 一律 418，模型必须同为 v2。
 - per-agent 通道：manager-api 把 Timbre 表音色注入 TTS configJson 的
   private_voice，覆盖共享配置的 voice（ConfigServiceImpl.buildModuleConfig）。

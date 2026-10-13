@@ -193,9 +193,10 @@ def _layer1_region(content: str) -> str:
 
 class TestKidsLayer1:
     def test_l1_holds_validated_kids_persona(self, kids_llm_conn):
-        """L1 应为小布验证过的儿童人设：短句/叠词/同龄口吻/反越狱/隐私条款。"""
+        """L1 应为小布（源工程）验证过的儿童人设：短句/叠词/同龄口吻/反越狱/隐私条款。"""
         _, llm = kids_llm_conn
         l1 = _layer1_region(_system_content(llm))
+        assert "你是小智" in l1, "人设开场自报家门为小智（spec 用户故事人设名）"
         assert PERSONA_MARK in l1, "儿童人设开场应在 L1"
         assert "每句话不超过 15 个字" in l1, "≤15 字短句规则"
         assert "多用叠词" in l1, "叠词不用成语规则"

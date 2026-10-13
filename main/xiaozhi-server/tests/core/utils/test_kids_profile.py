@@ -1,13 +1,13 @@
 """孩子档案年龄分档纯函数测试（工单 #6）。
 
-被测契约（溯源小布 accompany age_years/age_band，月粒度）：
+被测契约（溯源小布（源工程）accompany age_years/age_band，月粒度）：
 - 出生年月 "YYYY-MM" → 满岁数 = 月差 // 12，生日月即满岁
 - 档位：age<=5 → "3-5 岁"；age<=8 → "6-8 岁"；否则 "9 岁以上"
 - 生日缺失/非法/晚于当前年月 → None（退化为无年龄分档，不抛异常）
 
-render_kids_profile 渲染 L2 档案层文案：小布无独立档位文案，档位串只
+render_kids_profile 渲染 L2 档案层文案：小布（源工程）无独立档位文案，档位串只
 填「按%s孩子的理解和话题深度对话」单句槽位；段标题是 prompt 契约，
-保持小布逐字。档位串是 #5（灰色话题档）与 #7/#8（后台任务）复用的
+保持小布（源工程）逐字。档位串是 #5（灰色话题档）与 #7/#8（后台任务）复用的
 公共契约。
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ class TestAgeYears:
         assert age_years(bad) is None
 
     def test_future_birth_returns_none(self):
-        # 晚于当前年月视为非法（小布 validate_profile 同规则）
+        # 晚于当前年月视为非法（小布（源工程）validate_profile 同规则）
         assert age_years("2060-01") is None
 
 
@@ -74,7 +74,7 @@ FULL_PROFILE = {
 
 class TestRenderKidsProfile:
     def test_full_profile_renders_xiaobu_contract(self):
-        """全档案渲染：段标题与小布逐字，档位只填单句槽位。"""
+        """全档案渲染：段标题与小布（源工程）逐字，档位只填单句槽位。"""
         rendered = render_kids_profile(FULL_PROFILE, now=date(2025, 5, 20))
         assert rendered == (
             "【你陪伴的孩子】\n"

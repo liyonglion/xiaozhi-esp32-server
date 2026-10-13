@@ -13,7 +13,7 @@
       instructions: ...      # 家长嘱托（可选）
       taboos: [.., ..]       # 个性化禁忌（可选，一行一条）
 
-年龄按月粒度计算满岁（生日月即满岁，溯源小布 accompany age_years），
+年龄按月粒度计算满岁（生日月即满岁，溯源小布（源工程）accompany age_years），
 每轮对话用当前年月重算，过生日自动升档。档位串供 #5（灰色话题档）
 与 #7/#8（后台任务）复用；生日缺失/非法返回 None，退化为无年龄分档。
 """
@@ -75,7 +75,7 @@ def _clean(value) -> str:
 
 
 def render_kids_profile(kids_cfg: Optional[dict], now: date = None) -> str:
-    """kids 配置块 → L2 档案层文案（小布逐字契约）。
+    """kids 配置块 → L2 档案层文案（小布（源工程）逐字契约）。
 
     - 未开 enabled / 无可渲染内容 → 空串（空层跳过，不断对话）
     - 生日非法/缺失 → 跳过年龄行，其余行照常（退化为无年龄分档）

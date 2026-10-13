@@ -59,7 +59,7 @@
   `kids` 同名块 fallback，Python 端同一读取代码（`self.config["kids"]`）。
 - **孩子档案（kid profile）**：kids 块的档案子字段——`nickname`（称呼）
   与 `birth_ym`（出生年月，`YYYY-MM`）为档案主字段，`personality` /
-  `hobbies` / `instructions` / `taboos` 可选。渲染进 L2（小布逐字文案
+  `hobbies` / `instructions` / `taboos` 可选。渲染进 L2（小布（源工程）逐字文案
   契约）；生日缺失/非法退化为无年龄分档。
 - **家长页（parent console page）**：智控台集中家长管理的单页
   （manager-web `/kids-parent`，工单 #10）——孩子档案编辑（经

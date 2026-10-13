@@ -1,6 +1,6 @@
 """儿童陪伴模式输出安全门 + 关怀通道（spec #1 / 工单 #8）。
 
-移植自小布 accompany 的输出侧安全双保险（core/src/xb_core.c），分类
+移植自小布（源工程）accompany 的输出侧安全双保险（core/src/xb_core.c），分类
 prompt 与话术模板逐字保留（prompt 契约：节标题与模板措辞维持模型行为）。
 
 - 主回答流结束后用 SLM（``conn.slm``，独立于主对话模型）做六类后台分类，
@@ -31,7 +31,7 @@ from datetime import datetime
 from config.manage_api_client import report_interceptions
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
 
-# 红线/危险话术与兜底话题与输入侧三档（core.kids）同源：小布 TPL_* 逐字，
+# 红线/危险话术与兜底话题与输入侧三档（core.kids）同源：小布（源工程）TPL_* 逐字，
 # 单一样本源，输入侧（#5）与输出侧（#8）共用
 from core.kids import (
     DANGER_TEMPLATES as TPL_DANGER,
@@ -44,14 +44,14 @@ TAG = __name__
 # 分类指令（静态文本：每趟校验前缀稳定，缓存友好）。只审回答本身；care 由
 # 孩子的话触发（自残/受侵害暗示），是独立通道不是拦截
 SAFETY_INSTR = (
-    "你是儿童对话安全审核员。下面给你一段孩子的话和小布的回答，"
-    "只审核小布的回答，输出一个类别词，除类别词外什么都不要输出：\n"
+    "你是儿童对话安全审核员。下面给你一段孩子的话和小智的回答，"
+    "只审核小智的回答，输出一个类别词，除类别词外什么都不要输出：\n"
     "care——孩子说不想活了、要伤害自己，或说被人打、被人欺负、被侵害\n"
-    "redline——小布对孩子讲了血腥暴力、色情、恐怖吓人、赌博吸毒等硬红线内容\n"
-    "danger——小布同意、示范或教孩子做危险的事（玩火、爬窗、触电、吃异物、"
+    "redline——小智对孩子讲了血腥暴力、色情、恐怖吓人、赌博吸毒等硬红线内容\n"
+    "danger——小智同意、示范或教孩子做危险的事（玩火、爬窗、触电、吃异物、"
     "跟陌生人走、离家出走等）\n"
-    "privacy——小布主动询问孩子的家庭住址、密码、学校名字、家长手机号\n"
-    "profanity——孩子说了脏话，小布跟着说、重复脏话或没有纠正\n"
+    "privacy——小智主动询问孩子的家庭住址、密码、学校名字、家长手机号\n"
+    "profanity——孩子说了脏话，小智跟着说、重复脏话或没有纠正\n"
     "safe——以上都不是"
 )
 
@@ -280,7 +280,7 @@ def run_safety_gate(conn, user_text):
         conn.kids_block_streak = 0
         _record_failure(conn, "SLM 槽位未配置，审核通道不可用")
         return
-    prompt = f"【孩子说的】\n{user_text or ''}\n【小布回答的】\n{reply_text}"
+    prompt = f"【孩子说的】\n{user_text or ''}\n【小智回答的】\n{reply_text}"
     try:
         verdict = conn.slm.response_no_stream(SAFETY_INSTR, prompt)
     except Exception as e:  # noqa: BLE001 fail-open：审核通道故障不连坐对话

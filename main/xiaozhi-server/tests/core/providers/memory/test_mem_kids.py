@@ -1,6 +1,6 @@
 """儿童长期记忆 provider（mem_kids，工单 #7）测试。
 
-被测行为：本地摘要式记忆对齐小布 L3/L4 规则——
+被测行为：本地摘要式记忆对齐小布（源工程）L3/L4 规则——
 - 长期记忆为条目列表（{id, ts, text}），≤100 条，按 ts 升序注入 <memory>
 - 记忆抽取走 LLM（连接上为 conn.slm）输出 JSON add/delete 操作，
   住址/证件号/电话号码硬排除
@@ -69,7 +69,7 @@ def test_query_memory_empty_returns_empty_string(tmp_path):
 
 
 def test_query_memory_renders_entries_in_ts_order(tmp_path):
-    """L3 注入串：小布格式【小布记住的事】+ ts 升序条目，id 不进 prompt。"""
+    """L3 注入串：【小智记住的事】格式 + ts 升序条目，id 不进 prompt。"""
     role = "kid-order"
     entries = [
         {"id": 2, "ts": 200, "text": "喜欢恐龙"},
@@ -82,7 +82,7 @@ def test_query_memory_renders_entries_in_ts_order(tmp_path):
 
     out = asyncio.run(p.query_memory("你好"))
 
-    assert out.startswith("【小布记住的事】")
+    assert out.startswith("【小智记住的事】")
     lines = out.splitlines()
     assert lines[1] == "- 在上大班"
     assert lines[2] == "- 喜欢恐龙"
@@ -136,7 +136,7 @@ def test_save_memory_applies_add_and_delete_ops(tmp_path):
     p2.init_memory(role_id=role, llm=None)
     assert [e["text"] for e in p2.list_memories()] == ["喜欢恐龙"]
 
-    # 抽取输入含【对话记录】与【现有记忆】节（小布 build_extract_text 契约）
+    # 抽取输入含【对话记录】与【现有记忆】节（小布（源工程）build_extract_text 契约）
     _sys, user_prompt = slm.calls[0]
     assert "【对话记录】" in user_prompt
     assert "孩子：我现在喜欢恐龙了" in user_prompt
