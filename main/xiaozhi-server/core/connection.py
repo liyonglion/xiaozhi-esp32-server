@@ -31,6 +31,7 @@ from core.handle.reportHandle import report, enqueue_tool_report
 from core.providers.tts.default import DefaultTTS
 from concurrent.futures import ThreadPoolExecutor
 from core.utils.dialogue import Message, Dialogue
+from core.kids_safety import run_safety_gate
 from core.providers.asr.dto.dto import InterfaceType
 from core.handle.textHandle import handleTextMessage
 from core.providers.tools.unified_tool_handler import UnifiedToolHandler
@@ -141,6 +142,10 @@ class ConnectionHandler:
         self.intent = _intent
         # 后台任务小模型（安全分类/记忆抽取/窗口压缩），独立于主对话模型实例
         self.slm = None
+        # 儿童模式输出安全门状态（工单 #8）：连拦计数与拦截事件随连接生命周期
+        self.kids_block_streak = 0
+        self.kids_interceptions = []  # 拦截事件（统一 dict 结构；落库归 #9）
+        self.kids_safety_failures = []  # fail-open 故障留痕
 
         # 为每个连接单独管理声纹识别
         self.voiceprint_provider = None
@@ -1344,6 +1349,8 @@ class ConnectionHandler:
                                     content_type=ContentType.ACTION,
                                 )
                             )
+                            # direct_answer 也是主回答流，同样过安全门
+                            run_safety_gate(self, query)
                         return
 
                     tool_calls_list = real_tool_calls
@@ -1428,6 +1435,9 @@ class ConnectionHandler:
                     self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
                 )
             )
+            # 儿童模式输出安全门（工单 #8）：主回答流结束后台分类，与 TTS
+            # 合成并行；违规时弃音频、播兜底模板、改写窗口末条
+            run_safety_gate(self, query)
 
         return True
 
