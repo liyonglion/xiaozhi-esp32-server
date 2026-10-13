@@ -93,7 +93,7 @@ class Dialogue:
 
     def get_llm_dialogue_with_memory(
             self, memory_str: str = None, voiceprint_config: dict = None,
-            current_speaker: str = None,
+            current_speaker: str = None, summary_str: str = None,
     ) -> List[Dict[str, str]]:
         # 构建对话
         dialogue = []
@@ -116,6 +116,15 @@ class Dialogue:
                 full_prompt = re.sub(
                     r"<memory>.*?</memory>",
                     f"<memory>\n{memory_str}\n</memory>",
+                    full_prompt,
+                    flags=re.DOTALL,
+                )
+
+            # 填充滚动摘要（L4，工单 #7：儿童记忆 provider 提供；其它 provider 无此来源）
+            if summary_str is not None:
+                full_prompt = re.sub(
+                    r"<summary>.*?</summary>",
+                    lambda _m: f"<summary>\n{summary_str}\n</summary>",
                     full_prompt,
                     flags=re.DOTALL,
                 )

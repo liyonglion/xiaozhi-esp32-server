@@ -1,5 +1,6 @@
 import time
 import json
+import uuid
 import asyncio
 from typing import TYPE_CHECKING
 
@@ -7,9 +8,9 @@ if TYPE_CHECKING:
     from core.connection import ConnectionHandler
 from core.utils.util import audio_to_data
 from core.handle.abortHandle import handleAbortMessage
-from core.handle.intentHandler import handle_user_intent
-from core.utils.output_counter import check_device_output_limit
+from core.handle.intentHandler import handle_user_intent, speak_txt
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
+from core.kids import decide_kids_input
 
 TAG = __name__
 
@@ -93,6 +94,22 @@ async def startToChat(conn: "ConnectionHandler", text):
     if intent_handled:
         # 如果意图已被处理，不再进行聊天
         return
+
+    # 儿童模式：输入侧三档决策（工单 #5）
+    # 红线话题→温柔转移；危险行为→阻断+安全提醒；灰色话题→年龄适配放行。
+    # 决策事件挂 conn.kids_decision，供输出安全门(#8)/拦截日志(#9)接走，不落库。
+    if conn.kids_enabled:
+        decision = decide_kids_input(actual_text)
+        conn.kids_decision = decision
+        conn.logger.bind(tag=TAG).info(
+            f"儿童模式三档决策: {decision['category']} (age_band={decision['age_band']})"
+        )
+        if decision["action"] in ("deflect", "block"):
+            await send_stt_message(conn, actual_text)
+            conn.client_abort = False
+            conn.sentence_id = uuid.uuid4().hex
+            speak_txt(conn, decision["reply"])
+            return
 
     # 意图未被处理，继续常规聊天流程，使用实际文本内容
     await send_stt_message(conn, actual_text)

@@ -15,7 +15,8 @@
 - **L3（长期记忆 / layer-3-memory）**：长期记忆条目，记忆抽取时才变。
   现状等价物：`<memory>` 标签每轮注入的 `memory_str`。
 - **L4（滚动摘要 / layer-4-summary）**：对话窗口压缩产生的滚动摘要，
-  压缩时才变。骨架暂空，待后续票。
+  压缩时才变。由 `<summary>` 标签每轮注入（儿童记忆 provider mem_kids
+  提供，工单 #7）；其它记忆 provider 无此来源时保持空标签。
 - **L5（对话窗口 / window）**：system 消息之后的对话消息列表，每轮变。
   无提示词内标记，边界即 system 消息结束处。
 - **边界标记（layer marker）**：`<layer-N-*>` 标签对，分层结构的注入

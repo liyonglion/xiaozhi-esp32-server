@@ -89,4 +89,6 @@ For the input format `{"speaker":"...", "content":"..."}` (speaker = speaker nam
 </layer-3-memory>
 
 <layer-4-summary>
+<summary>
+</summary>
 </layer-4-summary>
