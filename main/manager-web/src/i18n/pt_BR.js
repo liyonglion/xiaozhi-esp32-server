@@ -1692,7 +1692,7 @@ export default {
   'kidsParent.noAgent': 'Ainda não há agentes, crie um primeiro',
   'kidsParent.loadFailed': 'Falha ao carregar, tente novamente mais tarde',
   'kidsParent.profile.title': 'Perfil da Criança',
-  'kidsParent.profile.effectHint': 'Surte efeito imediatamente via snapshot de configuração após salvar',
+  'kidsParent.profile.effectHint': 'Enviado via snapshot de configuração ao salvar, aplica-se da próxima conversa',
   'kidsParent.profile.enabled': 'Modo Infantil',
   'kidsParent.profile.nickname': 'Apelido',
   'kidsParent.profile.birthYm': 'Mês de Nascimento',
@@ -1709,7 +1709,12 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Selecione o mês de nascimento',
   'kidsParent.log.title': 'Registros de Interceptação',
   'kidsParent.log.time': 'Hora',
-  'kidsParent.log.category': 'Categoria',
+  'kidsParent.log.category': 'Categoria'
+  'kidsParent.log.category.care': 'Cuidado (automutilação/abuso)'
+  'kidsParent.log.category.redline': 'Linha vermelha'
+  'kidsParent.log.category.danger': 'Comportamento perigoso'
+  'kidsParent.log.category.privacy': 'Privacidade'
+  'kidsParent.log.category.profanity': 'Palavrões',
   'kidsParent.log.userText': 'Palavras da Criança',
   'kidsParent.log.modelReply': 'Resposta Original',
   'kidsParent.log.actualReply': 'O Que Foi Ouvido',

@@ -586,9 +586,6 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .fail((err) => {
-                callback(err);
-            })
             .networkFail((error) => {
                 terminateCallbackRequest(onTerminalFailure, error)
             })
@@ -602,9 +599,6 @@ export default {
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
-            })
-            .fail((err) => {
-                callback(err);
             })
             .networkFail((error) => {
                 terminateCallbackRequest(onTerminalFailure, error)
@@ -620,9 +614,6 @@ export default {
                 RequestService.clearRequestTime();
                 callback(res);
             })
-            .fail((err) => {
-                callback(err);
-            })
             .networkFail((error) => {
                 terminateCallbackRequest(onTerminalFailure, error)
             })
@@ -636,9 +627,6 @@ export default {
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
-            })
-            .fail((err) => {
-                callback(err);
             })
             .networkFail((error) => {
                 terminateCallbackRequest(onTerminalFailure, error)

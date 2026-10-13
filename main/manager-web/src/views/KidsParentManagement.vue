@@ -92,7 +92,7 @@
             <el-table-column :label="$t('kidsParent.log.category')" width="110">
               <template slot-scope="{ row }">
                 <el-tag :type="categoryTagType(row.category)" size="small">
-                  {{ row.category }}
+                  {{ categoryLabel(row.category) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -184,6 +184,7 @@ export default {
       selectedAgentId: '',
       profile: { ...DEFAULT_PROFILE },
       profileTaboosText: '',
+      profileLoaded: false,
       logs: [],
       logsLoading: false,
       memories: [],
@@ -234,7 +235,12 @@ export default {
       this.loadMemories();
     },
     loadProfile() {
-      Api.agent.getDeviceConfig(this.selectedAgentId, ({ data }) => {
+      const agentId = this.selectedAgentId;
+      this.profileLoaded = false;
+      Api.agent.getDeviceConfig(agentId, ({ data }) => {
+        if (agentId !== this.selectedAgentId) {
+          return; // 切换智能体后的过期响应，丢弃
+        }
         const agent = (data && data.data) || {};
         let profile = { ...DEFAULT_PROFILE, taboos: [] };
         if (agent.kidProfile) {
@@ -246,9 +252,16 @@ export default {
         }
         this.profile = profile;
         this.profileTaboosText = (profile.taboos || []).join('\n');
+        this.profileLoaded = true;
       });
     },
     saveProfile() {
+      // 档案未加载成功时表单是 DEFAULT_PROFILE（enabled=false 全空），
+      // 保存会把真实档案覆盖成空——先挡住
+      if (!this.profileLoaded) {
+        this.$message.error(i18n.t('kidsParent.loadFailed'));
+        return;
+      }
       this.$refs.profileForm.validate((valid) => {
         if (!valid) {
           return;
@@ -266,14 +279,20 @@ export default {
               message: i18n.t('kidsParent.profile.saveSuccess'),
               showClose: true,
             });
+          } else if (data) {
+            this.$message.error(data.msg || i18n.t('kidsParent.profile.saveFailed'));
           }
         });
       });
     },
     loadLogs() {
+      const agentId = this.selectedAgentId;
       this.logsLoading = true;
-      Api.agent.getInterceptionLogList(this.selectedAgentId, (res) => {
+      Api.agent.getInterceptionLogList(agentId, (res) => {
         this.logsLoading = false;
+        if (agentId !== this.selectedAgentId) {
+          return; // 过期响应，丢弃
+        }
         const body = res && res.data;
         if (body && body.code === 0) {
           this.logs = body.data || [];
@@ -286,12 +305,18 @@ export default {
       });
     },
     loadMemories() {
+      const agentId = this.selectedAgentId;
       this.memoriesLoading = true;
-      Api.agent.getKidsMemoryList(this.selectedAgentId, (res) => {
+      Api.agent.getKidsMemoryList(agentId, (res) => {
         this.memoriesLoading = false;
+        if (agentId !== this.selectedAgentId) {
+          return; // 过期响应，丢弃
+        }
         const body = res && res.data;
         if (body && body.code === 0) {
-          this.memories = body.data || [];
+          // 后端按 ts 升序返回（注入序），家长页展示最新在前，与拦截日志一致
+          const list = body.data || [];
+          this.memories = [...list].sort((a, b) => (b.ts || 0) - (a.ts || 0));
         } else if (body) {
           this.$message.error(body.msg || i18n.t('kidsParent.loadFailed'));
         }
@@ -348,16 +373,22 @@ export default {
       if (category === 'care' || category === 'redline') {
         return 'danger';
       }
-      if (category === 'danger' || category === 'profanity') {
+      if (category === 'danger' || category === 'profanity' || category === 'privacy') {
         return 'warning';
       }
       return 'info';
+    },
+    categoryLabel(category) {
+      const key = `kidsParent.log.category.${category}`;
+      return this.$te(key) ? this.$t(key) : category;
     },
     formatTime(value) {
       if (!value) {
         return '';
       }
-      const d = new Date(value);
+      // "yyyy-MM-dd HH:mm:ss" 空格分隔在 Safari/WebKit 返回 Invalid Date，
+      // 归一成 ISO-8601 再构造（row.ts 为毫秒时间戳不受影响）
+      const d = new Date(typeof value === 'string' ? value.replace(' ', 'T') : value);
       if (Number.isNaN(d.getTime())) {
         return '';
       }

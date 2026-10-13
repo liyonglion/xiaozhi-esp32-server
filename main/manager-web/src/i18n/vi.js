@@ -1692,7 +1692,7 @@ export default {
   'kidsParent.noAgent': 'Chưa có trợ lý, vui lòng tạo trước',
   'kidsParent.loadFailed': 'Tải thất bại, vui lòng thử lại sau',
   'kidsParent.profile.title': 'Hồ sơ trẻ',
-  'kidsParent.profile.effectHint': 'Có hiệu lực ngay qua ảnh chụp cấu hình sau khi lưu',
+  'kidsParent.profile.effectHint': 'Đẩy qua ảnh chụp cấu hình khi lưu, hiệu lực từ cuộc trò chuyện tiếp theo',
   'kidsParent.profile.enabled': 'Chế độ trẻ em',
   'kidsParent.profile.nickname': 'Tên gọi',
   'kidsParent.profile.birthYm': 'Tháng sinh',
@@ -1709,7 +1709,12 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Vui lòng chọn tháng sinh',
   'kidsParent.log.title': 'Nhật ký chặn',
   'kidsParent.log.time': 'Thời gian',
-  'kidsParent.log.category': 'Loại',
+  'kidsParent.log.category': 'Loại'
+  'kidsParent.log.category.care': 'Quan tâm (tự hại/bóc lột)'
+  'kidsParent.log.category.redline': 'Chủ đề lằn ranh đỏ'
+  'kidsParent.log.category.danger': 'Hành vi nguy hiểm'
+  'kidsParent.log.category.privacy': 'Riêng tư'
+  'kidsParent.log.category.profanity': 'Ngôn từ thô tục',
   'kidsParent.log.userText': 'Lời của trẻ',
   'kidsParent.log.modelReply': 'Câu trả lời gốc',
   'kidsParent.log.actualReply': 'Trẻ thực tế nghe',

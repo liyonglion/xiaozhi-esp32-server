@@ -1692,7 +1692,7 @@ export default {
   'kidsParent.noAgent': 'No agents yet, please create one first',
   'kidsParent.loadFailed': 'Failed to load, please try again later',
   'kidsParent.profile.title': 'Child Profile',
-  'kidsParent.profile.effectHint': 'Takes effect immediately via config snapshot after saving',
+  'kidsParent.profile.effectHint': 'Pushed via config snapshot on save, applies from the next conversation',
   'kidsParent.profile.enabled': 'Kids Mode',
   'kidsParent.profile.nickname': 'Nickname',
   'kidsParent.profile.birthYm': 'Birth Month',
@@ -1709,7 +1709,12 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Please select the birth month',
   'kidsParent.log.title': 'Interception Logs',
   'kidsParent.log.time': 'Time',
-  'kidsParent.log.category': 'Category',
+  'kidsParent.log.category': 'Category'
+  'kidsParent.log.category.care': 'Care (self-harm/abuse)'
+  'kidsParent.log.category.redline': 'Red-line topic'
+  'kidsParent.log.category.danger': 'Dangerous behavior'
+  'kidsParent.log.category.privacy': 'Privacy probing'
+  'kidsParent.log.category.profanity': 'Profanity',
   'kidsParent.log.userText': 'Child\'s Words',
   'kidsParent.log.modelReply': 'Original Reply',
   'kidsParent.log.actualReply': 'What Was Heard',

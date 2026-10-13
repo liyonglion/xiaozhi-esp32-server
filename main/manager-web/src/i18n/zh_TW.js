@@ -1692,7 +1692,7 @@ export default {
   'kidsParent.noAgent': '還沒有智能體，請先建立',
   'kidsParent.loadFailed': '載入失敗，請稍後重試',
   'kidsParent.profile.title': '孩子檔案',
-  'kidsParent.profile.effectHint': '儲存後經配置快照即時生效',
+  'kidsParent.profile.effectHint': '儲存後經配置快照下發，下輪對話生效',
   'kidsParent.profile.enabled': '兒童模式',
   'kidsParent.profile.nickname': '稱呼',
   'kidsParent.profile.birthYm': '出生年月',
@@ -1709,7 +1709,12 @@ export default {
   'kidsParent.profile.birthYmRequired': '請選擇出生年月',
   'kidsParent.log.title': '攔截日誌',
   'kidsParent.log.time': '時間',
-  'kidsParent.log.category': '類別',
+  'kidsParent.log.category': '類別'
+  'kidsParent.log.category.care': '關懷（自殘/受虐暗示）'
+  'kidsParent.log.category.redline': '紅線話題'
+  'kidsParent.log.category.danger': '危險行為'
+  'kidsParent.log.category.privacy': '隱私追問'
+  'kidsParent.log.category.profanity': '髒話未糾正',
   'kidsParent.log.userText': '孩子原話',
   'kidsParent.log.modelReply': '模型原回覆',
   'kidsParent.log.actualReply': '實際聽到',

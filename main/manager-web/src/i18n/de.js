@@ -1692,7 +1692,7 @@ export default {
   'kidsParent.noAgent': 'Noch kein Agent vorhanden, bitte zuerst erstellen',
   'kidsParent.loadFailed': 'Laden fehlgeschlagen, bitte später erneut versuchen',
   'kidsParent.profile.title': 'Kinderprofil',
-  'kidsParent.profile.effectHint': 'Wirkt nach dem Speichern sofort über den Konfigurations-Snapshot',
+  'kidsParent.profile.effectHint': 'Nach dem Speichern per Konfigurations-Snapshot übermittelt, wirksam ab dem nächsten Gespräch',
   'kidsParent.profile.enabled': 'Kindermodus',
   'kidsParent.profile.nickname': 'Rufname',
   'kidsParent.profile.birthYm': 'Geburtsmonat',
@@ -1709,7 +1709,12 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Bitte Geburtsmonat wählen',
   'kidsParent.log.title': 'Interceptionsprotokoll',
   'kidsParent.log.time': 'Zeit',
-  'kidsParent.log.category': 'Kategorie',
+  'kidsParent.log.category': 'Kategorie'
+  'kidsParent.log.category.care': 'Fürsorge (Selbstverletzung/Missbrauch)'
+  'kidsParent.log.category.redline': 'Rotlinie'
+  'kidsParent.log.category.danger': 'Gefährliches Verhalten'
+  'kidsParent.log.category.privacy': 'Privatsphäre'
+  'kidsParent.log.category.profanity': 'Vulgärsprache',
   'kidsParent.log.userText': 'Worte des Kindes',
   'kidsParent.log.modelReply': 'Ursprüngliche Antwort',
   'kidsParent.log.actualReply': 'Tatsächlich gehört',
