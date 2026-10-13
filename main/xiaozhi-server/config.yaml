@@ -1149,6 +1149,10 @@ TTS:
     ws_url: wss://dashscope.aliyuncs.com/api-ws/v1/inference/
     model: "cosyvoice-v2"
     voice: "longcheng_v2"
+    # 儿童陪伴模式：童声用 voice: "longhuhu"，且 model 必须保持 cosyvoice-v2
+    # （longhuhu 仅 v2 可用，v3/v3.5 引擎返回 418）。整台设备做儿童 Agent 时
+    # 直接改上面的 voice；多 Agent 部署时在智控台给儿童 Agent 绑定 longhuhu
+    # 音色，会经 private_voice 下发覆盖这里的 voice，模型沿用本配置的 model。
     output_dir: tmp/
     # 以下可不用设置，使用默认设置
     # format: pcm  # 音频格式：pcm、wav、mp3、opus
