@@ -12,8 +12,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.constant.Constant;
 import xiaozhi.common.exception.ErrorCode;
 import xiaozhi.common.exception.RenException;
@@ -49,6 +51,7 @@ import xiaozhi.modules.voiceclone.service.VoiceCloneService;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class ConfigServiceImpl implements ConfigService {
     private final SysParamsService sysParamsService;
     private final DeviceService deviceService;
@@ -219,6 +222,22 @@ public class ConfigServiceImpl implements ConfigService {
 
         // 获取声纹信息
         buildVoiceprintConfig(agent.getId(), result);
+
+        // 孩子档案（儿童模式）：开关+档案统一为 kids 块随 per-agent 下发，
+        // Python 服务端渲染进系统提示词 L2 层；文件模式由 config.yaml 顶层
+        // kids 同名块 fallback。坏 JSON 跳过下发（Python 端退化为无档案）。
+        if (StringUtils.isNotBlank(agent.getKidProfile())) {
+            try {
+                Map<String, Object> kids = JsonUtils.parseObject(agent.getKidProfile(),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+                if (kids != null && !kids.isEmpty()) {
+                    result.put("kids", kids);
+                }
+            } catch (Exception e) {
+                log.warn("kidProfile JSON 解析失败，跳过 kids 下发: {}", e.getMessage());
+            }
+        }
 
         // 构建模块配置
         buildModuleConfig(

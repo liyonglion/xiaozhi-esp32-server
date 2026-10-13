@@ -48,6 +48,8 @@ public enum AgentSnapshotField {
             (agent, data) -> agent.setSystemPrompt(data.getSystemPrompt())),
     SUMMARY_MEMORY("summaryMemory", AgentSnapshotDataDTO::getSummaryMemory, AgentUpdateDTO::getSummaryMemory,
             (agent, data) -> agent.setSummaryMemory(data.getSummaryMemory())),
+    KID_PROFILE("kidProfile", AgentSnapshotDataDTO::getKidProfile, AgentUpdateDTO::getKidProfile,
+            (agent, data) -> agent.setKidProfile(data.getKidProfile())),
     LANG_CODE("langCode", AgentSnapshotDataDTO::getLangCode, AgentUpdateDTO::getLangCode,
             (agent, data) -> agent.setLangCode(data.getLangCode())),
     LANGUAGE("language", AgentSnapshotDataDTO::getLanguage, AgentUpdateDTO::getLanguage,

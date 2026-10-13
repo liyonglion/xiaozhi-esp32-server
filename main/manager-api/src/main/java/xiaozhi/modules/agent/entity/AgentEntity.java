@@ -77,6 +77,10 @@ public class AgentEntity {
             "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
     private String summaryMemory;
 
+    @Schema(description = "孩子档案JSON（儿童模式：enabled开关 + 称呼/出生年月/性格/爱好/嘱托/禁忌）",
+            example = "{\"enabled\":true,\"nickname\":\"小豆\",\"birth_ym\":\"2019-05\"}", requiredMode = Schema.RequiredMode.NOT_REQUIRED)
+    private String kidProfile;
+
     @Schema(description = "语言编码")
     private String langCode;
 

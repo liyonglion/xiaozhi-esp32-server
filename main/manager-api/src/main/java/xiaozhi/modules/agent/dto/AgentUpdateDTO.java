@@ -76,6 +76,10 @@ public class AgentUpdateDTO implements Serializable {
             + "根据对话记录，总结user的重要信息，以便在未来的对话中提供更个性化的服务", nullable = true)
     private String summaryMemory;
 
+    @Schema(description = "孩子档案JSON（儿童模式：enabled开关 + 称呼/出生年月/性格/爱好/嘱托/禁忌）",
+            example = "{\"enabled\":true,\"nickname\":\"小豆\",\"birth_ym\":\"2019-05\"}", nullable = true)
+    private String kidProfile;
+
     @Schema(description = "聊天记录配置（0不记录 1仅记录文本 2记录文本和语音）", example = "3", nullable = true)
     private Integer chatHistoryConf;
 

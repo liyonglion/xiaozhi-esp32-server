@@ -1,6 +1,7 @@
 package xiaozhi.modules.config.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -18,12 +19,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.modules.agent.dao.AgentVoicePrintDao;
+import xiaozhi.modules.agent.vo.AgentInfoVO;
 import xiaozhi.modules.agent.service.AgentContextProviderService;
 import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
 import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.correctword.service.CorrectWordFileService;
+import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.model.service.ModelConfigService;
 import xiaozhi.modules.sys.dto.SysParamsDTO;
@@ -92,5 +95,79 @@ class ConfigServiceImplTest {
                 mock(VoiceCloneService.class),
                 mock(AgentVoicePrintDao.class),
                 mock(CorrectWordFileService.class));
+    }
+
+    // ===== 孩子档案 per-agent 下发（工单 #6）=====
+
+    private static ConfigServiceImpl newService(DeviceService deviceService, AgentService agentService) {
+        return new ConfigServiceImpl(
+                mock(SysParamsService.class),
+                deviceService,
+                mock(ModelConfigService.class),
+                agentService,
+                mock(AgentTemplateService.class),
+                mock(RedisUtils.class),
+                mock(TimbreService.class),
+                mock(AgentPluginMappingService.class),
+                mock(AgentMcpAccessPointService.class),
+                mock(AgentContextProviderService.class),
+                mock(VoiceCloneService.class),
+                mock(AgentVoicePrintDao.class),
+                mock(CorrectWordFileService.class));
+    }
+
+    private static DeviceService deviceServiceFor(String agentId) {
+        DeviceEntity device = new DeviceEntity();
+        device.setAgentId(agentId);
+        DeviceService deviceService = mock(DeviceService.class);
+        when(deviceService.getDeviceByMacAddress("aa:bb:cc:dd:ee:ff")).thenReturn(device);
+        return deviceService;
+    }
+
+    private static AgentService agentServiceFor(AgentInfoVO agent) {
+        AgentService agentService = mock(AgentService.class);
+        when(agentService.getAgentById(agent.getId())).thenReturn(agent);
+        return agentService;
+    }
+
+    @Test
+    void kidsProfileIsDeliveredAsParsedMap() {
+        // 档案 JSON（enabled + 档案子字段统一形状）随 agent-models 下发为 kids 块
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-1");
+        agent.setKidProfile("{\"enabled\":true,\"nickname\":\"小豆\",\"birth_ym\":\"2019-05\",\"taboos\":[\"不聊鬼故事\"]}");
+        ConfigServiceImpl service = newService(deviceServiceFor("agent-1"), agentServiceFor(agent));
+
+        Map<String, Object> result = service.getAgentModels("aa:bb:cc:dd:ee:ff", new HashMap<>());
+
+        Map<?, ?> kids = assertInstanceOf(Map.class, result.get("kids"));
+        assertEquals(true, kids.get("enabled"));
+        assertEquals("小豆", kids.get("nickname"));
+        assertEquals("2019-05", kids.get("birth_ym"));
+        assertEquals(List.of("不聊鬼故事"), kids.get("taboos"));
+    }
+
+    @Test
+    void blankKidProfileOmitsKidsKey() {
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-1");
+        ConfigServiceImpl service = newService(deviceServiceFor("agent-1"), agentServiceFor(agent));
+
+        Map<String, Object> result = service.getAgentModels("aa:bb:cc:dd:ee:ff", new HashMap<>());
+
+        assertFalse(result.containsKey("kids"));
+    }
+
+    @Test
+    void invalidKidProfileJsonOmitsKidsKeyWithoutThrowing() {
+        // 坏 JSON：跳过 kids 下发（Python 端退化为无档案），不炸整个配置接口
+        AgentInfoVO agent = new AgentInfoVO();
+        agent.setId("agent-1");
+        agent.setKidProfile("{not-json");
+        ConfigServiceImpl service = newService(deviceServiceFor("agent-1"), agentServiceFor(agent));
+
+        Map<String, Object> result = service.getAgentModels("aa:bb:cc:dd:ee:ff", new HashMap<>());
+
+        assertFalse(result.containsKey("kids"));
     }
 }
