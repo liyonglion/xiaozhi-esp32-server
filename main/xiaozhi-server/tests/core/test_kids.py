@@ -309,6 +309,33 @@ class TestStartToChatGate:
         finally:
             _teardown(conn, loop, thread)
 
+    def test_gray_input_uses_real_age_band_from_profile(self):
+        """灰色档接入真实档位（#6 缝）：档案生日在档时决策带按生日算的档位。"""
+        conn, llm, loop, thread = _build_llm_conn(kids=True, prime_chat=False)
+        try:
+            conn.websocket = FakeWebSocket()
+            conn.config["kids"] = {"enabled": True, "birth_ym": "2015-06"}
+            _run_start_to_chat(conn, loop, "人死了会去哪里呀")
+
+            assert conn.kids_decision["category"] == "gray"
+            assert conn.kids_decision["age_band"] == "9 岁以上", (
+                "档案生日在档时应取按生日计算的真实档位"
+            )
+            assert _wait_llm_called(llm), "灰色话题不拦截，照常进主 LLM"
+        finally:
+            _teardown(conn, loop, thread)
+
+    def test_gray_input_falls_back_to_default_band_without_profile(self):
+        """缺档案生日：退缺省档（6-8 岁），不阻断对话。"""
+        conn, llm, loop, thread = _build_llm_conn(kids=True, prime_chat=False)
+        try:
+            conn.websocket = FakeWebSocket()
+            _run_start_to_chat(conn, loop, "人死了会去哪里呀")
+
+            assert conn.kids_decision["age_band"] == DEFAULT_AGE_BAND
+        finally:
+            _teardown(conn, loop, thread)
+
     def test_plain_conn_danger_input_flows_to_llm(self):
         """非儿童连接：输入侧三档不生效，照常进主 LLM。"""
         conn, llm, loop, thread = _build_llm_conn(kids=False, prime_chat=False)

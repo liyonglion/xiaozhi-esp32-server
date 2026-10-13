@@ -10,7 +10,8 @@ from core.utils.util import audio_to_data
 from core.handle.abortHandle import handleAbortMessage
 from core.handle.intentHandler import handle_user_intent, speak_txt
 from core.handle.sendAudioHandle import send_stt_message, SentenceType
-from core.kids import decide_kids_input
+from core.kids import DEFAULT_AGE_BAND, decide_kids_input
+from core.utils.kids_profile import age_band
 
 TAG = __name__
 
@@ -99,7 +100,9 @@ async def startToChat(conn: "ConnectionHandler", text):
     # 红线话题→温柔转移；危险行为→阻断+安全提醒；灰色话题→年龄适配放行。
     # 决策事件挂 conn.kids_decision，供输出安全门(#8)/拦截日志(#9)接走，不落库。
     if conn.kids_enabled:
-        decision = decide_kids_input(actual_text)
+        # 年龄档位（#6 缝）：从连接的 kids 档案按生日计算；缺档案退缺省档
+        band = age_band((conn.config.get("kids") or {}).get("birth_ym")) or DEFAULT_AGE_BAND
+        decision = decide_kids_input(actual_text, age_band=band)
         conn.kids_decision = decision
         conn.logger.bind(tag=TAG).info(
             f"儿童模式三档决策: {decision['category']} (age_band={decision['age_band']})"
