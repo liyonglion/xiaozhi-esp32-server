@@ -146,9 +146,16 @@ def _record_failure(conn, reason):
 
 
 def _pick_topic_for_conn(conn):
-    """连接级槽位取材：记忆最新条目 → 档案「爱好」→ 静态兜底词。"""
+    """连接级槽位取材：记忆最新条目 → 档案「爱好」→ 静态兜底词。
+
+    记忆取活跃连接实例（duck-type 探测 mem_kids 的 list_memories，先例
+    _schedule_turn_end_tasks；非儿童 provider 无此方法时跳过）。
+    """
     kids = conn.config.get("kids") or {}
     memory_entries = None
+    list_memories = getattr(conn.memory, "list_memories", None)
+    if callable(list_memories):
+        memory_entries = [e.get("text") for e in list_memories()]
     # 档案「爱好」：扁平 hobbies 键，与 GLOSSARY/kids_profile/manager-api 下发同形
     profile_hobby = (kids.get("hobbies") or "").strip()
     return pick_topic(memory_entries, profile_hobby)

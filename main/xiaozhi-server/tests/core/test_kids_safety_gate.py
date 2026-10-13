@@ -307,6 +307,36 @@ def test_topic_slot_prefers_profile_hobby():
         _teardown(conn)
 
 
+class FakeKidsMemory:
+    """儿童记忆 provider 最小面（#7 mem_kids）：list_memories 供话题槽取材。"""
+
+    def __init__(self, entries):
+        self._entries = entries
+
+    async def query_memory(self, query):
+        return ""
+
+    def list_memories(self):
+        return [dict(e) for e in self._entries]
+
+
+def test_topic_slot_prefers_latest_memory_entry():
+    """槽位取材接入儿童记忆（#7）：最新条目（剥「喜欢」前缀）优先于档案爱好。"""
+    conn = _make_conn(kids={"enabled": True, "hobbies": "画画"})
+    conn.memory = FakeKidsMemory([
+        {"id": 1, "ts": 100, "text": "喜欢小汽车"},
+        {"id": 2, "ts": 200, "text": "喜欢恐龙"},
+    ])
+    try:
+        _run_chat(conn, FakeSLM(verdict="redline"))
+        spoken = _spoken_text(conn)
+        assert "恐龙" in spoken and "画画" not in spoken, (
+            f"槽位应取记忆最新条目（而非档案爱好）: {spoken}"
+        )
+    finally:
+        _teardown(conn)
+
+
 def test_pick_topic_tier_order():
     """槽位取材优先级：记忆最新条目（剥「喜欢」前缀）→ 档案爱好 → 静态兜底。"""
     from core.kids_safety import FALLBACK_TOPICS, pick_topic
