@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Please select the birth month',
   'kidsParent.log.title': 'Interception Logs',
   'kidsParent.log.time': 'Time',
-  'kidsParent.log.category': 'Category'
-  'kidsParent.log.category.care': 'Care (self-harm/abuse)'
-  'kidsParent.log.category.redline': 'Red-line topic'
-  'kidsParent.log.category.danger': 'Dangerous behavior'
-  'kidsParent.log.category.privacy': 'Privacy probing'
+  'kidsParent.log.category': 'Category',
+  'kidsParent.log.category.care': 'Care (self-harm/abuse)',
+  'kidsParent.log.category.redline': 'Red-line topic',
+  'kidsParent.log.category.danger': 'Dangerous behavior',
+  'kidsParent.log.category.privacy': 'Privacy probing',
   'kidsParent.log.category.profanity': 'Profanity',
   'kidsParent.log.userText': 'Child\'s Words',
   'kidsParent.log.modelReply': 'Original Reply',

@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Vui lòng chọn tháng sinh',
   'kidsParent.log.title': 'Nhật ký chặn',
   'kidsParent.log.time': 'Thời gian',
-  'kidsParent.log.category': 'Loại'
-  'kidsParent.log.category.care': 'Quan tâm (tự hại/bóc lột)'
-  'kidsParent.log.category.redline': 'Chủ đề lằn ranh đỏ'
-  'kidsParent.log.category.danger': 'Hành vi nguy hiểm'
-  'kidsParent.log.category.privacy': 'Riêng tư'
+  'kidsParent.log.category': 'Loại',
+  'kidsParent.log.category.care': 'Quan tâm (tự hại/bóc lột)',
+  'kidsParent.log.category.redline': 'Chủ đề lằn ranh đỏ',
+  'kidsParent.log.category.danger': 'Hành vi nguy hiểm',
+  'kidsParent.log.category.privacy': 'Riêng tư',
   'kidsParent.log.category.profanity': 'Ngôn từ thô tục',
   'kidsParent.log.userText': 'Lời của trẻ',
   'kidsParent.log.modelReply': 'Câu trả lời gốc',

@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Selecione o mês de nascimento',
   'kidsParent.log.title': 'Registros de Interceptação',
   'kidsParent.log.time': 'Hora',
-  'kidsParent.log.category': 'Categoria'
-  'kidsParent.log.category.care': 'Cuidado (automutilação/abuso)'
-  'kidsParent.log.category.redline': 'Linha vermelha'
-  'kidsParent.log.category.danger': 'Comportamento perigoso'
-  'kidsParent.log.category.privacy': 'Privacidade'
+  'kidsParent.log.category': 'Categoria',
+  'kidsParent.log.category.care': 'Cuidado (automutilação/abuso)',
+  'kidsParent.log.category.redline': 'Linha vermelha',
+  'kidsParent.log.category.danger': 'Comportamento perigoso',
+  'kidsParent.log.category.privacy': 'Privacidade',
   'kidsParent.log.category.profanity': 'Palavrões',
   'kidsParent.log.userText': 'Palavras da Criança',
   'kidsParent.log.modelReply': 'Resposta Original',

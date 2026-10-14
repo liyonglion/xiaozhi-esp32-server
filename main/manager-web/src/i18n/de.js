@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': 'Bitte Geburtsmonat wählen',
   'kidsParent.log.title': 'Interceptionsprotokoll',
   'kidsParent.log.time': 'Zeit',
-  'kidsParent.log.category': 'Kategorie'
-  'kidsParent.log.category.care': 'Fürsorge (Selbstverletzung/Missbrauch)'
-  'kidsParent.log.category.redline': 'Rotlinie'
-  'kidsParent.log.category.danger': 'Gefährliches Verhalten'
-  'kidsParent.log.category.privacy': 'Privatsphäre'
+  'kidsParent.log.category': 'Kategorie',
+  'kidsParent.log.category.care': 'Fürsorge (Selbstverletzung/Missbrauch)',
+  'kidsParent.log.category.redline': 'Rotlinie',
+  'kidsParent.log.category.danger': 'Gefährliches Verhalten',
+  'kidsParent.log.category.privacy': 'Privatsphäre',
   'kidsParent.log.category.profanity': 'Vulgärsprache',
   'kidsParent.log.userText': 'Worte des Kindes',
   'kidsParent.log.modelReply': 'Ursprüngliche Antwort',

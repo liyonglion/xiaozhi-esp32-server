@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': '請選擇出生年月',
   'kidsParent.log.title': '攔截日誌',
   'kidsParent.log.time': '時間',
-  'kidsParent.log.category': '類別'
-  'kidsParent.log.category.care': '關懷（自殘/受虐暗示）'
-  'kidsParent.log.category.redline': '紅線話題'
-  'kidsParent.log.category.danger': '危險行為'
-  'kidsParent.log.category.privacy': '隱私追問'
+  'kidsParent.log.category': '類別',
+  'kidsParent.log.category.care': '關懷（自殘/受虐暗示）',
+  'kidsParent.log.category.redline': '紅線話題',
+  'kidsParent.log.category.danger': '危險行為',
+  'kidsParent.log.category.privacy': '隱私追問',
   'kidsParent.log.category.profanity': '髒話未糾正',
   'kidsParent.log.userText': '孩子原話',
   'kidsParent.log.modelReply': '模型原回覆',

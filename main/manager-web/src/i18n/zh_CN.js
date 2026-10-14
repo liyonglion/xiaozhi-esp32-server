@@ -1709,11 +1709,11 @@ export default {
   'kidsParent.profile.birthYmRequired': '请选择出生年月',
   'kidsParent.log.title': '拦截日志',
   'kidsParent.log.time': '时间',
-  'kidsParent.log.category': '类别'
-  'kidsParent.log.category.care': '关怀（自残/受虐暗示）'
-  'kidsParent.log.category.redline': '红线话题'
-  'kidsParent.log.category.danger': '危险行为'
-  'kidsParent.log.category.privacy': '隐私追问'
+  'kidsParent.log.category': '类别',
+  'kidsParent.log.category.care': '关怀（自残/受虐暗示）',
+  'kidsParent.log.category.redline': '红线话题',
+  'kidsParent.log.category.danger': '危险行为',
+  'kidsParent.log.category.privacy': '隐私追问',
   'kidsParent.log.category.profanity': '脏话未纠正',
   'kidsParent.log.userText': '孩子原话',
   'kidsParent.log.modelReply': '模型原回复',
