@@ -77,6 +77,10 @@ async def get_config_from_api_async(config):
             "vision_explain": config["server"].get("vision_explain", ""),
             "auth_key": config["server"].get("auth_key", ""),
         }
+        # 本地显式配置的 websocket 地址优先（智控台内置参数 server.websocket 不可编辑）
+        local_websocket = config["server"].get("websocket")
+        if local_websocket:
+            config_data["server"]["websocket"] = local_websocket
     config_data["server"]["auth"] = {"enabled": auth_enabled}
     # 如果服务器没有prompt_template，则从本地配置读取
     if not config_data.get("prompt_template"):
