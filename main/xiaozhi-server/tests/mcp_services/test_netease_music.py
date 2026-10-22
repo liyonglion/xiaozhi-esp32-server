@@ -1,5 +1,5 @@
-"""mcp/netease_mcp/netease_music.py 纯逻辑测试（网络路径由端到端手动验证）。"""
-from mcp.netease_mcp.netease_music import (
+"""mcp_services/netease_mcp/netease_music.py 纯逻辑测试（网络路径由端到端手动验证）。"""
+from mcp_services.netease_mcp.netease_music import (
     is_valid_download,
     parse_hot_playlist,
     parse_search_results,

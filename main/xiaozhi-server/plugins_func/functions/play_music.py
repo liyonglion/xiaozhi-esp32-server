@@ -6,7 +6,7 @@ import difflib
 import traceback
 from pathlib import Path
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
-from mcp.netease_mcp import netease_music
+from mcp_services.netease_mcp import netease_music
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from typing import TYPE_CHECKING
 
