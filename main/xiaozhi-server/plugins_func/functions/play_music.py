@@ -6,6 +6,7 @@ import difflib
 import traceback
 from pathlib import Path
 from core.providers.tts.dto.dto import TTSMessageDTO, SentenceType, ContentType
+from mcp.netease_mcp import netease_music
 from plugins_func.register import register_function, ToolType, ActionResponse, Action
 from typing import TYPE_CHECKING
 
@@ -131,6 +132,7 @@ async def handle_music_command(conn: "ConnectionHandler", text):
     conn.logger.bind(tag=TAG).debug(f"检查是否是音乐命令: {clean_text}")
 
     # 尝试匹配具体歌名
+    potential_song = _extract_song_name(clean_text)
     if os.path.exists(MUSIC_CACHE["music_dir"]):
         if time.time() - MUSIC_CACHE["scan_time"] > MUSIC_CACHE["refresh_time"]:
             # 刷新音乐文件列表
@@ -139,14 +141,23 @@ async def handle_music_command(conn: "ConnectionHandler", text):
             )
             MUSIC_CACHE["scan_time"] = time.time()
 
-        potential_song = _extract_song_name(clean_text)
         if potential_song:
             best_match = _find_best_match(potential_song, MUSIC_CACHE["music_files"])
             if best_match:
                 conn.logger.bind(tag=TAG).info(f"找到最匹配的歌曲: {best_match}")
                 await play_local_music(conn, specific_file=best_match)
                 return True
-    # 检查是否是通用播放音乐命令
+    if potential_song:
+        # 本地无匹配（或本地目录不存在），在线播放指定歌曲
+        if await try_play_online(conn, potential_song):
+            return True
+    elif await try_play_online(conn, None):
+        # 通用随机播放：优先热歌榜在线随机（本地曲库少易腻）
+        return True
+    elif MUSIC_CACHE["music_files"]:
+        # 在线不可用（无网/接口异常）时随机播本地兜底
+        await play_local_music(conn)
+        return True
     await play_local_music(conn)
     return True
 
@@ -232,3 +243,69 @@ async def play_local_music(conn: "ConnectionHandler", specific_file=None):
     except Exception as e:
         conn.logger.bind(tag=TAG).error(f"播放音乐失败: {str(e)}")
         conn.logger.bind(tag=TAG).error(f"详细错误: {traceback.format_exc()}")
+
+
+ONLINE_CACHE_DIR = os.path.join("tmp", "netease_music")
+
+
+async def try_play_online(conn: "ConnectionHandler", song_name):
+    """在线搜歌并播放。song_name 为 None 时从热歌榜随机取一首。成功返回 True。"""
+    try:
+        song = await (
+            netease_music.get_hot_song()
+            if song_name is None
+            else netease_music.search_song(song_name)
+        )
+        if song is None:
+            conn.logger.bind(tag=TAG).warning(f"在线未找到可播放的歌曲: {song_name}")
+            return False
+        display = song["name"] + (f" - {song['artist']}" if song["artist"] else "")
+        conn.logger.bind(tag=TAG).info(f"在线播放: {display} (id={song['id']})")
+        music_path = await netease_music.download_song(song["id"], ONLINE_CACHE_DIR)
+        if music_path is None:
+            conn.logger.bind(tag=TAG).error(f"在线下载失败: {display}")
+            return False
+        await play_online_music(conn, music_path, display)
+        return True
+    except Exception as e:
+        conn.logger.bind(tag=TAG).error(f"在线播放出错: {e}")
+        conn.logger.bind(tag=TAG).error(traceback.format_exc())
+        return False
+
+
+async def play_online_music(conn: "ConnectionHandler", music_path: str, display_name: str):
+    """播放下载好的在线音乐文件（与 play_local_music 同构，直接推 TTS 队列）"""
+    text = f"正在为您在线播放，《{display_name}》"
+    conn.tts.store_tts_text(conn.sentence_id, text)
+    if conn.intent_type == "intent_llm":
+        conn.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=conn.sentence_id,
+                sentence_type=SentenceType.FIRST,
+                content_type=ContentType.ACTION,
+            )
+        )
+    conn.tts.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id=conn.sentence_id,
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.TEXT,
+            content_detail=text,
+        )
+    )
+    conn.tts.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id=conn.sentence_id,
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.FILE,
+            content_file=music_path,
+        )
+    )
+    if conn.intent_type == "intent_llm":
+        conn.tts.tts_text_queue.put(
+            TTSMessageDTO(
+                sentence_id=conn.sentence_id,
+                sentence_type=SentenceType.LAST,
+                content_type=ContentType.ACTION,
+            )
+        )
