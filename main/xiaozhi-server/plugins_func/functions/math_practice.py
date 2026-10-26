@@ -1,0 +1,357 @@
+"""口算练习插件（地图 #20 决议实现，切片①）。
+
+三个工具：
+- start_practice(difficulty, mode)：开新轮 / 继续断点 / 重开
+- submit_answer(answer)：确定性判题（归一化→精确比较），答错两次给讲解素材+巩固题
+- end_practice：主动退出收尾
+
+分工（#24/#26 决议）：数字事实全部由工具计算（出题器/讲解素材），LLM 只负责
+组织孩子听得懂的话；题面经 send_display_message 上屏，答题回显顶掉后补发恢复。
+
+判定循环（#23 决议）：每题 2 次作答机会；30s 无作答轻推一次，再 30s 跳过并讲解。
+"""
+from __future__ import annotations
+
+import asyncio
+import random
+from typing import TYPE_CHECKING
+
+from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+from mcp_services.math_practice import explanations, generator
+from mcp_services.math_practice.session import new_session, store, view_text
+from plugins_func.register import Action, ActionResponse, ToolType, register_function
+
+if TYPE_CHECKING:
+    from core.connection import ConnectionHandler
+
+TAG = __name__
+
+_timers: dict[str, asyncio.Task] = {}
+
+_PRESET_KEYS = {
+    "学前": "preschool", "幼儿园": "preschool",
+    "一年级上": "g1a", "一上": "g1a", "一年级上册": "g1a",
+    "一年级下": "g1b", "一下": "g1b", "一年级下册": "g1b",
+    "二年级上": "g2a", "二上": "g2a", "二年级上册": "g2a",
+    "二年级下": "g2b", "二下": "g2b", "二年级下册": "g2b",
+    "一年级": "g1b", "二年级": "g2b",
+}
+
+
+def _plugin_cfg(conn: "ConnectionHandler") -> dict:
+    return conn.config.get("plugins", {}).get("math_practice", {})
+
+
+def _resolve_preset(difficulty: str) -> str:
+    if not difficulty:
+        return generator.FALLBACK_PRESET
+    d = difficulty.strip()
+    if d in generator.PRESETS:
+        return d
+    for key, preset in _PRESET_KEYS.items():
+        if key in d:
+            return preset
+    return generator.FALLBACK_PRESET
+
+
+def _advance(s: dict, scored: bool) -> dict:
+    """推进到下一题（巩固题不计题量、不循环）；主题全部作答完毕时 answered == total。"""
+    role = s["questions"][s["idx"]]["role"]
+    is_main = role == "main"
+    return {
+        **s,
+        "idx": s["idx"] + 1,
+        "attempts": 0,
+        "score": s["score"] + (1 if scored and is_main else 0),
+        "answered": s["answered"] + (1 if is_main else 0),
+        "main_no": s["main_no"] + (1 if is_main else 0),
+    }
+
+
+def _wrap_up_text(s: dict) -> str:
+    return f"答对{s['score']}题，共{s['total']}题"
+
+
+async def _say(conn: "ConnectionHandler", text: str) -> None:
+    """直接排队一句 TTS（超时提醒等无 LLM 参与的播报）。"""
+    conn.tts.store_tts_text(conn.sentence_id, text)
+    conn.tts.tts_text_queue.put(
+        TTSMessageDTO(
+            sentence_id=conn.sentence_id,
+            sentence_type=SentenceType.MIDDLE,
+            content_type=ContentType.TEXT,
+            content_detail=text,
+        )
+    )
+
+
+async def _show_question(conn: "ConnectionHandler", s: dict) -> None:
+    """题面上屏 + 无声字幕恢复（答题回显会顶掉单槽屏的题面，#22 调研结论）。
+
+    懒导入：sendAudioHandle 带 opuslib 等重依赖，也便于测试 stub。
+    """
+    from core.handle.sendAudioHandle import send_display_message, send_tts_message
+
+    view = view_text(s)
+    await send_display_message(conn, view)
+    await send_tts_message(conn, "sentence_start", view)
+
+
+async def _respond_next(conn: "ConnectionHandler", s: dict, scored: bool, lead: str) -> ActionResponse:
+    """推进到下一题或收尾（收尾用推进后的计分），返回给 LLM 的引导。"""
+    s2 = _advance(s, scored)
+    if s2["answered"] >= s2["total"]:
+        store.delete(conn.device_id)
+        _cancel_timer(conn.device_id)
+        return ActionResponse(
+            action=Action.REQLLM,
+            result=(
+                f"练习完成！孩子{_wrap_up_text(s2)}。"
+                "请按孩子的表现收尾：表现好就大力表扬，错得多也要找到亮点鼓励。"
+                "最后问孩子要不要再来一轮；孩子同意就调用 start_practice 重新开始。"
+            ),
+        )
+    saved = store.save(s2)
+    _bump_timer(conn, saved)
+    await _show_question(conn, saved)
+    return ActionResponse(
+        action=Action.REQLLM,
+        result=f"{lead}然后读下一题：{view_text(saved)}。孩子回答后继续调用 submit_answer。",
+    )
+
+
+def _start_timer(conn: "ConnectionHandler", s: dict) -> None:
+    nudge = float(_plugin_cfg(conn).get("nudge_seconds", 30))
+    if nudge <= 0:
+        return
+    device_id = conn.device_id
+    token = s["last_active"]
+    _timers[device_id] = asyncio.create_task(_nudge_loop(conn, device_id, token, nudge))
+
+
+def _bump_timer(conn: "ConnectionHandler", s: dict) -> None:
+    old = _timers.pop(conn.device_id, None)
+    if old:
+        old.cancel()
+    _start_timer(conn, s)
+
+
+def _cancel_timer(device_id: str) -> None:
+    task = _timers.pop(device_id, None)
+    if task:
+        task.cancel()
+
+
+async def _nudge_loop(conn: "ConnectionHandler", device_id: str, token: float, nudge: int) -> None:
+    """两级超时（#23）：30s 轻推一次，再 30s 跳过并讲解，然后读下一题。"""
+    try:
+        await asyncio.sleep(nudge)
+        s = store.get(device_id)
+        if s is None or s["last_active"] != token:
+            return
+        await _say(conn, "别急，再想一想，想好了告诉我。")
+        await asyncio.sleep(nudge)
+        s = store.get(device_id)
+        if s is None or s["last_active"] != token:
+            return
+        qq = s["questions"][s["idx"]]
+        material = explanations.build_material(qq)
+        await _say(conn, f"没关系，这道题先跳过。正确答案是{material['answer']}。{material['steps']}")
+        s2 = _advance(s, scored=False)
+        if s2["answered"] >= s2["total"]:
+            store.delete(device_id)
+            await _say(conn, f"练习结束，{_wrap_up_text(s2)}，你很棒！")
+            return
+        saved = store.save(s2)
+        await _say(conn, f"下一题：{view_text(saved)}")
+        await _show_question(conn, saved)
+        _start_timer(conn, saved)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:  # 连接可能已断，超时链静默终止
+        try:
+            conn.logger.bind(tag=TAG).warning(f"口算练习超时提醒中断: {e}")
+        except Exception:
+            pass
+
+
+start_practice_desc = {
+    "type": "function",
+    "function": {
+        "name": "start_practice",
+        "description": (
+            "当孩子想练习口算/数学时调用，开始一轮口算练习。"
+            "difficulty：年级或难度，可选值：学前、一年级上、一年级下、二年级上、二年级下；"
+            "设备未配置时先问孩子上几年级再传入，孩子说不清就留空。"
+            "mode：工具提示已有进行中的练习时才需要——孩子选继续传 resume，选重新开始传 restart。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "difficulty": {"type": "string", "description": "年级或难度描述，如：一年级下"},
+                "mode": {"type": "string", "description": "resume=继续上次，restart=重新开始，默认空"},
+            },
+            "required": [],
+        },
+    },
+}
+
+
+@register_function("start_practice", start_practice_desc, ToolType.SYSTEM_CTL)
+async def start_practice(conn: "ConnectionHandler", difficulty: str = "", mode: str = ""):
+    device_id = conn.device_id
+    existing = store.get(device_id)
+    if existing is not None and mode == "":
+        return ActionResponse(
+            action=Action.REQLLM,
+            result=(
+                f"该设备已有一轮进行中的练习（第{existing['main_no']}/{existing['total']}题）。"
+                "请询问孩子：继续上次的，还是重新开始？孩子选继续就调用 start_practice(mode='resume')，"
+                "选重新开始就调用 start_practice(mode='restart')。"
+            ),
+        )
+    if existing is not None and mode == "resume":
+        _bump_timer(conn, existing)
+        await _show_question(conn, existing)
+        return ActionResponse(
+            action=Action.REQLLM,
+            result=(
+                f"继续上次的练习，当前第{existing['main_no']}/{existing['total']}题。"
+                f"请说一句「我们继续练口算啦」，然后读题：{view_text(existing)}。"
+                "孩子回答后调用 submit_answer(answer=孩子的原话)。"
+            ),
+        )
+    preset = _resolve_preset(difficulty)
+    total = max(1, min(20, int(_plugin_cfg(conn).get("count", 10))))
+    questions = generator.generate_practice(generator.PRESETS[preset], total, random.Random())
+    s = store.save(new_session(device_id, questions, total))
+    _bump_timer(conn, s)
+    await _show_question(conn, s)
+    return ActionResponse(
+        action=Action.REQLLM,
+        result=(
+            f"口算练习开始（{generator.PRESET_NAMES[preset]}），共{total}题。"
+            "请热情地开个场，然后把第一题清楚地读给孩子听："
+            f"{view_text(s)}。等孩子口头回答后，调用 submit_answer(answer=孩子说的原话)。不要替孩子答题。"
+        ),
+    )
+
+
+submit_answer_desc = {
+    "type": "function",
+    "function": {
+        "name": "submit_answer",
+        "description": (
+            "口算练习中，孩子每口头回答一次就调用一次，传入孩子说的话原文。"
+            "答案可以是数字（如 12 或 十二）或比大小符号（大于/小于/等于）。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string", "description": "孩子口头回答的原话，如：三十五 / 17 / 大于号"},
+            },
+            "required": ["answer"],
+        },
+    },
+}
+
+
+@register_function("submit_answer", submit_answer_desc, ToolType.SYSTEM_CTL)
+async def submit_answer(conn: "ConnectionHandler", answer: str):
+    device_id = conn.device_id
+    s = store.get(device_id)
+    if s is None:
+        return ActionResponse(
+            action=Action.REQLLM,
+            result="当前没有进行中的口算练习。如果孩子想练习，请调用 start_practice。",
+        )
+    qq = s["questions"][s["idx"]]
+    got = generator.normalize_answer(answer, qq["kind"])
+    if got is None:
+        _bump_timer(conn, s)  # 孩子在积极说话，重置超时计时
+        return ActionResponse(
+            action=Action.REQLLM,
+            result=(
+                f"孩子的回答「{answer}」没有解析出数字或符号。"
+                "如果原话里有明确的答案，提取出来重新调用 submit_answer；"
+                "否则请温和地引导孩子再说一遍。"
+            ),
+        )
+    correct = got == qq["answer"]
+
+    if correct:
+        praise = "巩固题也答对了，真棒！" if qq["role"] == "reinforce" else "答对了！"
+        lead = f"{praise}请简短表扬一句，"
+        return await _respond_next(conn, s, scored=True, lead=lead)
+
+    if qq["role"] == "reinforce":  # 巩固题一次机会，不循环（#26 决议）
+        material = explanations.build_material(qq)
+        lead = (
+            f"巩固题没答对，没关系。直接温柔地告诉孩子答案：{material['answer']}（{material['steps']}），"
+        )
+        return await _respond_next(conn, s, scored=False, lead=lead)
+
+    if s["attempts"] == 0:  # 首错：鼓励重试，不透露答案（#23 决议）
+        saved = store.save({**s, "attempts": 1})
+        _bump_timer(conn, saved)
+        return ActionResponse(
+            action=Action.REQLLM,
+            result="答错了。请温和地说「没关系，再想想」鼓励孩子再算一次，不要透露答案也不要讲解。"
+                   "孩子再次回答后调用 submit_answer。",
+        )
+
+    # 二错：讲解素材 + 巩固题（#26：素材给 LLM，数字事实为准，LLM 不算数）
+    material = explanations.build_material(qq)
+    reinforce = generator.TYPES[qq["type"]]["gen"](random.Random())
+    while reinforce["text"] == qq["text"]:  # 巩固题避开原题
+        reinforce = generator.TYPES[qq["type"]]["gen"](random.Random())
+    questions = [
+        *s["questions"][: s["idx"] + 1],
+        {**reinforce, "role": "reinforce"},
+        *s["questions"][s["idx"] + 1 :],
+    ]
+    saved = store.save({
+        **s,
+        "questions": questions,
+        "idx": s["idx"] + 1,  # 推进到巩固题（原题已判完，answered 计数）
+        "attempts": 0,
+        "answered": s["answered"] + 1,
+        "main_no": s["main_no"] + 1,
+    })
+    _bump_timer(conn, saved)
+    await _show_question(conn, saved)
+    return ActionResponse(
+        action=Action.REQLLM,
+        result=(
+            f"孩子第二次答错。请用简短、鼓励的语气按以下素材讲解（数字以素材为准，不要自行计算）："
+            f"方法：{material['method']}；步骤：{material['steps']}；正确答案：{material['answer']}。"
+            f"讲解完后读这道巩固题：{view_text(saved)}，孩子回答后调用 submit_answer。"
+        ),
+    )
+
+
+end_practice_desc = {
+    "type": "function",
+    "function": {
+        "name": "end_practice",
+        "description": "当孩子主动表示不想继续练习（如「不想练了」「我要玩别的」）时调用，结束本轮。",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+
+@register_function("end_practice", end_practice_desc, ToolType.SYSTEM_CTL)
+async def end_practice(conn: "ConnectionHandler"):
+    device_id = conn.device_id
+    s = store.get(device_id)
+    if s is None:
+        return ActionResponse(action=Action.REQLLM, result="当前没有进行中的口算练习，自然收尾即可。")
+    store.delete(device_id)
+    _cancel_timer(device_id)
+    return ActionResponse(
+        action=Action.REQLLM,
+        result=(
+            f"练习结束，孩子已完成{s['answered']}/{s['total']}题，答对{s['score']}题。"
+            "请简短收尾并鼓励孩子，不要追问练不练了。"
+        ),
+    )
