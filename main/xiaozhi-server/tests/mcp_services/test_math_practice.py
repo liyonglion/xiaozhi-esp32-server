@@ -187,7 +187,7 @@ class FakeWS:
         self._conn.sent.append(json.loads(message))
 
 
-def make_conn(device_id="AA:BB:CC:DD:EE:FF", nudge=0, count=3):
+def make_conn(device_id="AA:BB:CC:DD:EE:FF", nudge=0, count=5):
     conn = SimpleNamespace(
         device_id=device_id,
         config={"plugins": {"math_practice": {"count": count, "nudge_seconds": nudge}}},
@@ -216,6 +216,10 @@ def _clean_state():
         with contextlib.suppress(RuntimeError):
             task.cancel()
     mp._timers.clear()
+    for task in list(mp._report_tasks):
+        with contextlib.suppress(RuntimeError):
+            task.cancel()
+    mp._report_tasks.clear()
     mp.store._sessions.clear()
 
 
@@ -225,11 +229,11 @@ class TestPluginFlow:
         r = await mp.start_practice(conn, difficulty="一年级上")
         assert r.action == Action.REQLLM and "第一题" in r.result
         s = mp.store.get(conn.device_id)
-        assert s is not None and s["total"] == 3 and len(s["questions"]) == 3
-        assert any(v.startswith("1/3") for v in stt_views(conn))
+        assert s is not None and s["total"] == 5 and len(s["questions"]) == 5
+        assert any(v.startswith("1/5") for v in stt_views(conn))
 
     async def test_full_flow_with_reinforce(self):
-        conn = make_conn(count=3)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         s = mp.store.get(conn.device_id)
 
@@ -237,7 +241,7 @@ class TestPluginFlow:
         assert "答对" in r.result
         s = mp.store.get(conn.device_id)
         assert s["score"] == 1 and s["idx"] == 1 and s["answered"] == 1
-        assert any(v.startswith("2/3") for v in stt_views(conn))
+        assert any(v.startswith("2/5") for v in stt_views(conn))
 
         q2 = s["questions"][1]
         r = await mp.submit_answer(conn, wrong_for(q2))
@@ -247,22 +251,26 @@ class TestPluginFlow:
         r = await mp.submit_answer(conn, wrong_for(q2))
         assert "方法" in r.result and "加练" in r.result
         s = mp.store.get(conn.device_id)
-        assert len(s["questions"]) == 4 and s["questions"][s["idx"]]["role"] == "reinforce"
+        assert len(s["questions"]) == 6 and s["questions"][s["idx"]]["role"] == "reinforce"
         assert s["answered"] == 2 and s["main_no"] == 3
 
         r = await mp.submit_answer(conn, wrong_for(s["questions"][s["idx"]]))
         assert "巩固题没答对" in r.result
         s = mp.store.get(conn.device_id)
         assert s["questions"][s["idx"]]["role"] == "main"
-        assert any(v.startswith("3/3") for v in stt_views(conn))
+        assert any(v.startswith("3/5") for v in stt_views(conn))
 
-        r = await mp.submit_answer(conn, str(s["questions"][s["idx"]]["answer"]))
-        assert "练习完成" in r.result and "答对2题，共3题" in r.result
+        # 答完剩余主题题收尾：q1 对、q2 错、巩固错，其后全对 → 4/5
+        for _ in range(3):
+            r = await mp.submit_answer(conn, str(mp.store.get(conn.device_id)["questions"][mp.store.get(conn.device_id)["idx"]]["answer"]))
+            if mp.store.get(conn.device_id) is None:
+                break
+        assert "练习完成" in r.result and "答对4题，共5题" in r.result
         assert mp.store.get(conn.device_id) is None
         assert conn.device_id not in mp._timers
 
     async def test_reinforce_correct_returns_to_main(self):
-        conn = make_conn(count=2)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         s = mp.store.get(conn.device_id)
         await mp.submit_answer(conn, wrong_for(s["questions"][0]))
@@ -274,7 +282,7 @@ class TestPluginFlow:
         assert s["questions"][s["idx"]]["role"] == "main" and s["idx"] == 2
 
     async def test_chinese_number_answer(self):
-        conn = make_conn(count=2)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         s = mp.store.get(conn.device_id)
         ans = s["questions"][0]["answer"]
@@ -282,16 +290,16 @@ class TestPluginFlow:
         assert "答对" in r.result
 
     async def test_end_practice_deletes_session(self):
-        conn = make_conn(count=3)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         r = await mp.end_practice(conn)
-        assert "已完成0/3" in r.result and "答对0题" in r.result
+        assert "已完成0/5" in r.result and "答对0题" in r.result
         assert mp.store.get(conn.device_id) is None
         r = await mp.end_practice(conn)
         assert "没有进行中" in r.result
 
     async def test_resume_and_restart(self):
-        conn = make_conn(count=3)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         s = mp.store.get(conn.device_id)
         await mp.submit_answer(conn, str(s["questions"][0]["answer"]))
@@ -302,14 +310,14 @@ class TestPluginFlow:
 
         r = await mp.start_practice(conn, difficulty="一上", mode="resume")
         assert "继续上次的练习" in r.result
-        assert any(v.startswith("2/3") for v in stt_views(conn))
+        assert any(v.startswith("2/5") for v in stt_views(conn))
 
         r = await mp.start_practice(conn, difficulty="一年级下", mode="restart")
         s = mp.store.get(conn.device_id)
-        assert s["idx"] == 0 and s["total"] == 3 and set(q["role"] for q in s["questions"]) == {"main"}
+        assert s["idx"] == 0 and s["total"] == 5 and set(q["role"] for q in s["questions"]) == {"main"}
 
     async def test_unparsed_answer_keeps_question(self):
-        conn = make_conn(count=2)
+        conn = make_conn(count=5)
         await mp.start_practice(conn, difficulty="一上")
         s = mp.store.get(conn.device_id)
         before = s["idx"]
@@ -336,7 +344,7 @@ class TestNudgeTimer:
         monkeypatch.setattr(asyncio, "sleep", _real_sleep)
 
     async def test_timeout_skips_and_advances(self):
-        conn = make_conn(nudge=0.05, count=3)
+        conn = make_conn(nudge=0.05, count=5)
         await mp.start_practice(conn, difficulty="一上")
         await asyncio.sleep(0.18)
         s = mp.store.get(conn.device_id)
@@ -344,9 +352,95 @@ class TestNudgeTimer:
         assert any("正确答案" in t for t in conn.tts.stored)
 
     async def test_end_practice_cancels_timer(self):
-        conn = make_conn(nudge=0.05, count=3)
+        conn = make_conn(nudge=0.05, count=5)
         await mp.start_practice(conn, difficulty="一上")
         await mp.end_practice(conn)
         await asyncio.sleep(0.18)
         assert conn.tts.stored == []
         assert mp.store.get(conn.device_id) is None
+
+
+class TestDeviceConfigAndReport:
+    """切片②：设备级配置（admin 配置页）与练习记录上报。"""
+
+    async def test_device_config_overrides(self, monkeypatch):
+        async def fake_fetch(conn):
+            return {"preset": "g2a", "typeIds": ["M1", "M2"], "questionCount": 5}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn(count=5)
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="一上")  # 远端配置优先于 difficulty
+        s = mp.store.get(conn.device_id)
+        assert s["preset"] == "g2a" and s["total"] == 5
+        assert {q["type"] for q in s["questions"]} <= {"M1", "M2"}
+
+    async def test_fetch_failure_falls_back(self, monkeypatch):
+        async def failing_fetch(conn):
+            raise RuntimeError("api down")
+
+        monkeypatch.setattr(mp, "_fetch_device_config", failing_fetch)
+        conn = make_conn(count=5)
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="一年级下")  # 回落 difficulty + config.yaml
+        s = mp.store.get(conn.device_id)
+        assert s["preset"] == "g1b" and s["total"] == 5
+        assert {q["type"] for q in s["questions"]} <= set(generator.PRESETS["g1b"])
+
+    async def test_invalid_remote_fields_ignored(self, monkeypatch):
+        async def fake_fetch(conn):
+            return {"preset": "g9x", "typeIds": ["A1", "BAD"], "questionCount": 99}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn(count=5)
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="")
+        s = mp.store.get(conn.device_id)
+        assert s["preset"] == "g1a" and s["total"] == 20  # 非法预设回落，99 钳到 20
+        assert "BAD" not in {q["type"] for q in s["questions"]}
+
+    async def test_no_api_mode_never_fetches(self, monkeypatch):
+        called = []
+
+        async def fake_fetch(conn):
+            called.append(1)
+            return {"preset": "g2a"}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn(count=5)  # 未开 read_config_from_api
+        await mp.start_practice(conn, difficulty="一上")
+        assert called == []
+        assert mp.store.get(conn.device_id)["preset"] == "g1a"
+
+    async def test_report_on_complete(self, monkeypatch):
+        reported = []
+
+        async def fake_report(conn, s):
+            reported.append(s)
+
+        monkeypatch.setattr(mp, "_report_result", fake_report)
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        for qq in mp.store.get(conn.device_id)["questions"]:
+            await mp.submit_answer(conn, str(qq["answer"]))
+        if mp._report_tasks:  # 等 fire-and-forget 上报落地
+            await asyncio.wait_for(asyncio.gather(*list(mp._report_tasks)), timeout=1)
+        assert len(reported) == 1
+        s = reported[0]
+        assert s["preset"] == "g1a" and s["total"] == 5 and s["score"] == 5
+        assert "started_at" in s  # 时长由此计算
+
+    async def test_report_on_end_practice(self, monkeypatch):
+        reported = []
+
+        async def fake_report(conn, s):
+            reported.append(s)
+
+        monkeypatch.setattr(mp, "_report_result", fake_report)
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        await mp.end_practice(conn)
+        if mp._report_tasks:
+            await asyncio.wait_for(asyncio.gather(*list(mp._report_tasks)), timeout=1)
+        assert len(reported) == 1 and reported[0]["total"] == 5
+

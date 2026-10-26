@@ -14,12 +14,13 @@ import time
 SESSION_TTL = 24 * 3600
 
 
-def new_session(device_id: str, questions: list[dict], total: int) -> dict:
+def new_session(device_id: str, questions: list[dict], total: int, preset: str = "") -> dict:
     now = time.time()
     return {
         "device_id": device_id,
         "questions": [{**qq, "role": "main"} for qq in questions],
         "total": total,
+        "preset": preset,  # 供收尾上报练习记录（#24）
         "idx": 0,
         "main_no": 1,  # 当前主题序号（1-based，不含巩固题）
         "score": 0,

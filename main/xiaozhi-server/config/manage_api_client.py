@@ -252,6 +252,36 @@ async def get_correct_words(instance, mac_address: str) -> Optional[Dict]:
     )
 
 
+@api_guard("获取口算练习配置失败")
+async def get_math_practice_config(instance, mac_address: str) -> Optional[Dict]:
+    """获取设备口算练习配置（admin 家长页配置；未配置返回 None 由插件回落默认档）"""
+    return await instance._execute_async_request(
+        "POST", "/config/math-practice",
+        json={"macAddress": mac_address}
+    )
+
+
+@api_guard("上报口算练习记录失败")
+async def report_math_practice(
+    instance, mac_address: str, preset: str, total: int, correct: int, duration_seconds: int
+) -> Optional[Dict]:
+    """上报一次练习会话结果（#24：一次会话一行只读记录）。
+
+    单次请求不走重试：服务端 insert 无幂等键，超时重试可能落两行，
+    破坏「一次会话一行」不变量；丢一条可容忍（记录是最小版统计）。
+    """
+    return await instance._async_request(
+        "POST", "/config/math-practice/report",
+        json={
+            "macAddress": mac_address,
+            "preset": preset,
+            "total": total,
+            "correct": correct,
+            "durationSeconds": duration_seconds,
+        },
+    )
+
+
 @api_guard("生成并保存聊天记录总结失败")
 async def generate_and_save_chat_summary(instance, session_id: str) -> Optional[Dict]:
     """生成并保存聊天记录总结（守护线程中调用，服务已关闭时静默返回 None）"""

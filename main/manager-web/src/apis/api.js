@@ -12,6 +12,7 @@ import voiceResource from './module/voiceResource.js'
 import knowledgeBase from './module/knowledgeBase.js'
 import correctWord from './module/correctWord.js'
 import addressBook from './module/addressBook.js'
+import mathPractice from './module/mathPractice.js'
 
 
 
@@ -45,5 +46,6 @@ export default {
     voiceClone,
     knowledgeBase,
     correctWord,
-    addressBook
+    addressBook,
+    mathPractice
   }

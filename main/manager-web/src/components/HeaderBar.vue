@@ -92,6 +92,15 @@
           }" />
           <span class="nav-text">{{ $t("header.addressBook") }}</span>
         </div>
+        <div class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/math-practice-config' }"
+          @click="handleRouter('mathPracticeConfig')">
+          <img loading="lazy" alt="" src="@/assets/header/knowledge_base.png" :style="{
+            filter:
+              $route.path === '/math-practice-config' ? 'brightness(0) invert(1)' : 'None',
+          }" />
+          <span class="nav-text">{{ $t("header.mathPractice") }}</span>
+        </div>
         <el-dropdown v-if="userInfo.superAdmin" trigger="click" class="equipment-management more-dropdown" :class="{
           'active-tab':
             $route.path === '/dict-management' ||
@@ -220,6 +229,7 @@ export default {
         replacementWordManagement: "/replacement-word-management",
         serverSideManagement: "/server-side-management",
         featureManagement: "/feature-management",
+        mathPracticeConfig: "/math-practice-config",
       }
     };
   },

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import TYPE_CHECKING
 
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 TAG = __name__
 
 _timers: dict[str, asyncio.Task] = {}
+_report_tasks: set[asyncio.Task] = set()  # 持引用防 GC；fire-and-forget 上报
 
 _PRESET_KEYS = {
     "学前": "preschool", "幼儿园": "preschool",
@@ -52,6 +54,64 @@ def _resolve_preset(difficulty: str) -> str:
         if key in d:
             return preset
     return generator.FALLBACK_PRESET
+
+
+async def _fetch_device_config(conn: "ConnectionHandler") -> dict | None:
+    """拉 admin 家长页配置的设备级口算配置（切片②）。独立函数便于测试 stub。"""
+    from config import manage_api_client
+
+    return await manage_api_client.get_math_practice_config(conn.device_id)
+
+
+MIN_COUNT, MAX_COUNT = 5, 20  # 每轮题量档位（#23 决议：默认 10，可配 5~20，三层统一）
+
+
+async def _device_overrides(conn: "ConnectionHandler", difficulty: str) -> tuple[str, list[str], int]:
+    """解析生效配置：远端设备配置 > difficulty 入参 > config.yaml 默认（#24 决议）。
+
+    远端字段不可信（可能过期/手改库），逐项校验后采用，非法值忽略。
+    """
+    preset = _resolve_preset(difficulty)
+    type_ids = list(generator.PRESETS[preset])
+    count = max(MIN_COUNT, min(MAX_COUNT, int(_plugin_cfg(conn).get("count", 10))))
+    if not conn.config.get("read_config_from_api"):
+        return preset, type_ids, count
+    try:
+        remote = await _fetch_device_config(conn)
+    except Exception:
+        remote = None  # 配置页不可用不拦练习，回落默认
+    if remote:
+        if remote.get("preset") in generator.PRESETS:
+            preset = remote["preset"]
+            type_ids = list(generator.PRESETS[preset])
+        ids = [t for t in (remote.get("typeIds") or []) if t in generator.TYPES]
+        if ids:
+            type_ids = ids
+        try:
+            count = max(MIN_COUNT, min(MAX_COUNT, int(remote.get("questionCount") or count)))
+        except (TypeError, ValueError):
+            pass
+    return preset, type_ids, count
+
+
+async def _report_result(conn: "ConnectionHandler", s: dict) -> None:
+    """收尾上报练习记录（#24：一次会话一行）。独立函数便于测试 stub。"""
+    from config import manage_api_client
+
+    await manage_api_client.report_math_practice(
+        conn.device_id,
+        s.get("preset", ""),
+        s["total"],
+        s["score"],
+        int(time.time() - s["started_at"]),
+    )
+
+
+def _report_in_background(conn: "ConnectionHandler", s: dict) -> None:
+    """fire-and-forget 上报：记录接口带重试（最长分钟级），不能拖住收尾播报。"""
+    task = asyncio.create_task(_report_result(conn, s))
+    _report_tasks.add(task)
+    task.add_done_callback(_report_tasks.discard)
 
 
 def _advance(s: dict, scored: bool) -> dict:
@@ -103,6 +163,7 @@ async def _respond_next(conn: "ConnectionHandler", s: dict, scored: bool, lead: 
     if s2["answered"] >= s2["total"]:
         store.delete(conn.device_id)
         _cancel_timer(conn.device_id)
+        _report_in_background(conn, s2)
         return ActionResponse(
             action=Action.REQLLM,
             result=(
@@ -160,6 +221,7 @@ async def _nudge_loop(conn: "ConnectionHandler", device_id: str, token: float, n
         s2 = _advance(s, scored=False)
         if s2["answered"] >= s2["total"]:
             store.delete(device_id)
+            _report_in_background(conn, s2)
             await _say(conn, f"练习结束，{_wrap_up_text(s2)}，你很棒！")
             return
         saved = store.save(s2)
@@ -221,10 +283,9 @@ async def start_practice(conn: "ConnectionHandler", difficulty: str = "", mode: 
                 "孩子回答后调用 submit_answer(answer=孩子的原话)。"
             ),
         )
-    preset = _resolve_preset(difficulty)
-    total = max(1, min(20, int(_plugin_cfg(conn).get("count", 10))))
-    questions = generator.generate_practice(generator.PRESETS[preset], total, random.Random())
-    s = store.save(new_session(device_id, questions, total))
+    preset, type_ids, total = await _device_overrides(conn, difficulty)
+    questions = generator.generate_practice(type_ids, total, random.Random())
+    s = store.save(new_session(device_id, questions, total, preset))
     _bump_timer(conn, s)
     await _show_question(conn, s)
     return ActionResponse(
@@ -348,6 +409,7 @@ async def end_practice(conn: "ConnectionHandler"):
         return ActionResponse(action=Action.REQLLM, result="当前没有进行中的口算练习，自然收尾即可。")
     store.delete(device_id)
     _cancel_timer(device_id)
+    _report_in_background(conn, s)
     return ActionResponse(
         action=Action.REQLLM,
         result=(
