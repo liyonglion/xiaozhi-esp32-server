@@ -14,7 +14,8 @@ import time
 SESSION_TTL = 24 * 3600
 
 
-def new_session(device_id: str, questions: list[dict], total: int, preset: str = "") -> dict:
+def new_session(device_id: str, questions: list[dict], total: int, preset: str = "",
+                streak: int = 0) -> dict:
     now = time.time()
     return {
         "device_id": device_id,
@@ -27,6 +28,8 @@ def new_session(device_id: str, questions: list[dict], total: int, preset: str =
         "answered": 0,
         "attempts": 0,
         "timeout_skips": 0,  # 连续超时跳过计数（≥2 停超时链保留会话，#23 被动中断）
+        "streak": streak,  # 连对计数（#29：跨会话续接，seed=最近 record 的 streak_end）
+        "streak_peak": streak,  # 本会话连对峰值（收尾随 record 上报）
         "started_at": now,
         "last_active": now,
     }

@@ -33,6 +33,12 @@ public class MathPracticeRecordEntity {
     @Schema(description = "本轮用时（秒）")
     private Integer durationSeconds;
 
+    @Schema(description = "会话收尾时连对值（跨会话续接 + currentStreak 口径）")
+    private Integer streakEnd;
+
+    @Schema(description = "本会话连对峰值")
+    private Integer streakPeak;
+
     @Schema(description = "练习时间")
     private Date createdAt;
 }

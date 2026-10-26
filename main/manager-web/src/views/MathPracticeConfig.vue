@@ -95,6 +95,9 @@
                     <el-table-column :label="$t('mathPractice.recordScore')">
                       <template slot-scope="scope">{{ scope.row.correct }} / {{ scope.row.total }}</template>
                     </el-table-column>
+                    <el-table-column :label="$t('mathPractice.recordStreak')">
+                      <template slot-scope="scope">{{ scope.row.streakPeak || 0 }}</template>
+                    </el-table-column>
                     <el-table-column :label="$t('mathPractice.recordDuration')">
                       <template slot-scope="scope">{{ formatDuration(scope.row.durationSeconds) }}</template>
                     </el-table-column>

@@ -33,4 +33,12 @@ public class MathPracticeReportDTO {
     @Schema(description = "本轮用时（秒）")
     @Min(0)
     private Integer durationSeconds;
+
+    @Schema(description = "会话收尾时连对值（旧版上报方缺省时落库默认 0，不做强制）")
+    @Min(0)
+    private Integer streakEnd;
+
+    @Schema(description = "本会话连对峰值（缺省落库默认 0）")
+    @Min(0)
+    private Integer streakPeak;
 }

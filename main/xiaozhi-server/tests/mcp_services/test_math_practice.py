@@ -191,18 +191,56 @@ class FakeWS:
         self._conn = conn
 
     async def send(self, message):
-        self._conn.sent.append(json.loads(message))
+        m = json.loads(message)
+        self._conn.sent.append(m)
+        # 设备端 MCP 响应回环：tools/call 请求立即结算 future（真路径经 call_mcp_tool）
+        mc = getattr(self._conn, "mcp_client", None)
+        if m.get("type") == "mcp" and mc is not None:
+            p = m["payload"]
+            if p.get("method") == "tools/call":
+                fut = mc.futures.get(p["id"])
+                if fut and not fut.done():
+                    fut.set_result({"content": [{"text": "ok"}]})
 
 
-def make_conn(device_id="AA:BB:CC:DD:EE:FF", nudge=0, count=5):
+class FakeMCPClient:
+    """设备 MCP 客户端假件：注册 update_progress 工具并按 id 结算调用。"""
+
+    def __init__(self, tools=("update_progress",)):
+        self.tools = {name: {"description": name, "inputSchema": {}} for name in tools}
+        self.name_mapping = {}
+        self.ready = True
+        self.futures = {}
+
+    def has_tool(self, name):
+        return name in self.tools
+
+    async def is_ready(self):
+        return self.ready
+
+    async def get_next_id(self):
+        return len(self.futures) + 1
+
+    async def register_call_result_future(self, tid, future):
+        self.futures[tid] = future
+
+    async def cleanup_call_result_future(self, tid):
+        self.futures.pop(tid, None)
+
+
+def make_conn(device_id="AA:BB:CC:DD:EE:FF", nudge=0, count=5, token="", mcp=None):
     conn = SimpleNamespace(
         device_id=device_id,
-        config={"plugins": {"math_practice": {"count": count, "nudge_seconds": nudge}}},
+        config={"plugins": {"math_practice": {
+            "count": count, "nudge_seconds": nudge, "progress_token": token,
+        }}},
         session_id="s1", sentence_id=1, intent_type="function_call",
         sent=[], logger=logger,
     )
     conn.tts = FakeTTS()
     conn.websocket = FakeWS(conn)
+    conn.features = {"mcp": mcp is not None}
+    conn.mcp_client = mcp
     return conn
 
 
@@ -214,6 +252,18 @@ def wrong_for(q):
     if q["kind"] == "int":
         return str(q["answer"] + 1) if q["answer"] < 100 else "99"
     return "大于号" if q["answer"] != ">" else "小于号"
+
+
+@pytest.fixture(autouse=False)
+def _real_sleep(monkeypatch):
+    """顶层 conftest 把 asyncio.sleep 换成了不 yield 的空操作（提速重试循环），
+    计时器/等待类测试需要真实等待：用 executor 实现的真 sleep 替换回来。"""
+
+    async def _real_sleep(seconds):
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, time.sleep, min(seconds, 0.3))
+
+    monkeypatch.setattr(asyncio, "sleep", _real_sleep)
 
 
 @pytest.fixture(autouse=True)
@@ -228,6 +278,8 @@ def _clean_state():
             task.cancel()
     mp._report_tasks.clear()
     mp.store._sessions.clear()
+    mp._last_streak_end.clear()
+    mp._push_locks.clear()
 
 
 class TestPluginFlow:
@@ -340,15 +392,9 @@ class TestPluginFlow:
 
 class TestNudgeTimer:
     @pytest.fixture(autouse=True)
-    def _real_sleep(self, monkeypatch):
-        """顶层 conftest 把 asyncio.sleep 换成了不 yield 的空操作（提速重试循环），
-        计时器测试需要真实等待：用 executor 实现的真 sleep 替换回来。"""
-
-        async def _real_sleep(seconds):
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, time.sleep, min(seconds, 0.3))
-
-        monkeypatch.setattr(asyncio, "sleep", _real_sleep)
+    def _need_real_sleep(self, _real_sleep):
+        """见模块级 _real_sleep fixture。"""
+        return None
 
     async def test_timeout_skips_and_advances(self):
         conn = make_conn(nudge=0.05, count=5)
@@ -485,4 +531,250 @@ class TestDeviceConfigAndReport:
         s = mp.store.get(conn.device_id)
         await mp.submit_answer(conn, str(s["questions"][s["idx"]]["answer"]))
         assert mp.store.get(conn.device_id)["timeout_skips"] == 0
+
+
+# ───────────────────────── streak（#29：P2 学习进度屏） ─────────────────────────
+
+class TestStreak:
+    """单计数器口径：主题答对 +1、判错清零、巩固题不计、超时清零、跨会话续接。"""
+
+    async def test_correct_increments_first_wrong_holds_second_wrong_resets(self):
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, str(s["questions"][0]["answer"]))
+        assert mp.store.get(conn.device_id)["streak"] == 1
+
+        q2 = mp.store.get(conn.device_id)["questions"][1]
+        await mp.submit_answer(conn, wrong_for(q2))  # 首错：未判决，streak 不动
+        assert mp.store.get(conn.device_id)["streak"] == 1
+        await mp.submit_answer(conn, wrong_for(q2))  # 二错：判错清零
+        s = mp.store.get(conn.device_id)
+        assert s["streak"] == 0 and s["streak_peak"] == 1
+
+    async def test_retry_correct_counts(self):
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        q = s["questions"][0]
+        await mp.submit_answer(conn, wrong_for(q))
+        await mp.submit_answer(conn, str(q["answer"]))  # 重试答对 = 判对
+        assert mp.store.get(conn.device_id)["streak"] == 1
+
+    async def test_reinforce_not_counted(self, monkeypatch):
+        """巩固题对不 +1、错不清零（#26：学习环节非考核）——用续接底数做判别。"""
+        async def fake_fetch(conn):
+            return {"streakEnd": 2}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn(count=5)
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="一上")
+        q = mp.store.get(conn.device_id)["questions"][0]
+        await mp.submit_answer(conn, wrong_for(q))
+        await mp.submit_answer(conn, wrong_for(q))  # 二错：判错清零（2→0），插巩固题
+        assert mp.store.get(conn.device_id)["streak"] == 0
+        reinforce = mp.store.get(conn.device_id)["questions"][mp.store.get(conn.device_id)["idx"]]
+        await mp.submit_answer(conn, str(reinforce["answer"]))  # 巩固题对：不 +1
+        s = mp.store.get(conn.device_id)
+        assert s["streak"] == 0 and s["streak_peak"] == 2  # 底数 2 已随清零丢失，峰值保留
+
+    async def test_peak_survives_reset(self):
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, str(s["questions"][0]["answer"]))
+        await mp.submit_answer(conn, str(mp.store.get(conn.device_id)["questions"][1]["answer"]))
+        await mp.submit_answer(conn, str(mp.store.get(conn.device_id)["questions"][2]["answer"]))
+        assert mp.store.get(conn.device_id)["streak_peak"] == 3
+        q = mp.store.get(conn.device_id)["questions"][3]
+        await mp.submit_answer(conn, wrong_for(q))
+        await mp.submit_answer(conn, wrong_for(q))
+        s = mp.store.get(conn.device_id)
+        assert s["streak"] == 0 and s["streak_peak"] == 3  # 峰值不清
+        await mp.submit_answer(conn, str(s["questions"][s["idx"]]["answer"]))  # 巩固题对：不计
+        r = await mp.submit_answer(conn, str(mp.store.get(conn.device_id)["questions"][mp.store.get(conn.device_id)["idx"]]["answer"]))  # 第5主题对 → 收尾
+        assert "答对4题" in r.result  # q1-q3 + q5
+        assert mp._last_streak_end.get(conn.device_id) == 1  # 清零后重新攒到 1
+        assert mp.store.get(conn.device_id) is None
+
+    async def test_timeout_skip_clears_streak(self, _real_sleep):
+        conn = make_conn(nudge=0.05, count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, str(s["questions"][0]["answer"]))  # streak 1
+        await asyncio.sleep(0.18)  # 第 2 题超时跳过（跳过=不会，清零）
+        assert mp.store.get(conn.device_id)["streak"] == 0
+
+    async def test_continues_from_remote_streak_end(self, monkeypatch):
+        async def fake_fetch(conn):
+            return {"streakEnd": 3}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn(count=5)
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        assert s["streak"] == 3 and s["streak_peak"] == 3  # 峰值含续接底数
+        await mp.submit_answer(conn, str(s["questions"][0]["answer"]))
+        assert mp.store.get(conn.device_id)["streak"] == 4
+
+    async def test_continues_in_process_after_report(self, monkeypatch):
+        """连玩两轮：上一轮收尾上报后进程内即记 streak_end，新轮免等落库即续接。"""
+        async def fake_report(conn, s):
+            pass
+
+        monkeypatch.setattr(mp, "_report_result", fake_report)
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        for qq in list(mp.store.get(conn.device_id)["questions"]):
+            await mp.submit_answer(conn, str(qq["answer"]))
+        assert mp._last_streak_end.get(conn.device_id) == 5
+        await mp.start_practice(conn, difficulty="一上")  # 新一轮
+        assert mp.store.get(conn.device_id)["streak"] == 5
+
+    async def test_report_carries_streak_values(self, monkeypatch):
+        captured = {}
+
+        async def fake_report(mac, preset, total, correct, duration, streak_end, streak_peak):
+            captured.update(streak_end=streak_end, streak_peak=streak_peak)
+
+        monkeypatch.setattr("config.manage_api_client.report_math_practice", fake_report)
+        conn = make_conn(count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        q1 = mp.store.get(conn.device_id)["questions"][0]
+        await mp.submit_answer(conn, str(q1["answer"]))
+        q2 = mp.store.get(conn.device_id)["questions"][1]
+        await mp.submit_answer(conn, wrong_for(q2))
+        await mp.submit_answer(conn, wrong_for(q2))
+        await mp.end_practice(conn)  # 中途退出：streak 0、peak 1 随记录上报
+        if mp._report_tasks:
+            await asyncio.wait_for(asyncio.gather(*list(mp._report_tasks)), timeout=1)
+        assert captured == {"streak_end": 0, "streak_peak": 1}
+
+
+# ───────────────────────── 进度推送（#29：update_progress 主通道） ─────────────────────────
+
+AGG = {
+    "todayCorrect": 7, "todayTotal": 10, "todayMaxStreak": 4,
+    "currentStreak": 2, "bestStreak": 9,
+    "weekAccuracy": 70, "weekCorrect": 14, "weekTotal": 20,
+    "recentSessions": [{"time": "2026-10-25 20:00", "correct": 7, "total": 10, "streakPeak": 4}],
+}
+
+
+def progress_pushes(conn):
+    return [m["payload"]["params"] for m in conn.sent
+            if m.get("type") == "mcp" and m["payload"].get("method") == "tools/call"]
+
+
+async def drain_tasks():
+    if mp._report_tasks:
+        await asyncio.wait_for(asyncio.gather(*list(mp._report_tasks)), timeout=2)
+
+
+class TestProgressPush:
+    """推送时机（判决推进后/收尾/停链）+ 全量 8 字段 + 会话实时值叠加。"""
+
+    async def test_push_after_correct_judgment_overlays_live_session(self, monkeypatch):
+        async def fake_progress(mac, token):
+            assert token == "tk"
+            return dict(AGG)
+
+        monkeypatch.setattr("config.manage_api_client.get_math_practice_progress", fake_progress)
+        conn = make_conn(count=5, token="tk", mcp=FakeMCPClient())
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, str(s["questions"][0]["answer"]))
+        await drain_tasks()
+        pushes = progress_pushes(conn)
+        assert len(pushes) == 1
+        assert pushes[0]["name"] == "update_progress"
+        a = pushes[0]["arguments"]
+        assert a["todayCorrect"] == 8 and a["todayTotal"] == 11  # 聚合 + 本会话
+        assert a["currentStreak"] == 1 and a["todayMaxStreak"] == 4 and a["bestStreak"] == 9
+        assert a["weekAccuracy"] == 71  # (14+1)/(20+1) = 71.4% → 71
+        assert a["recentSessions"][0] == {  # 进行中会话插到最近场次之首
+            "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(s["started_at"])),
+            "correct": 1, "total": 1, "streakPeak": 1,
+        }
+
+    async def test_no_push_before_judgment_or_without_channel(self, monkeypatch):
+        async def fake_progress(mac, token):
+            return dict(AGG)
+
+        monkeypatch.setattr("config.manage_api_client.get_math_practice_progress", fake_progress)
+        conn = make_conn(count=5, token="tk", mcp=FakeMCPClient())
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, "不知道")  # 未解析：不推
+        q = s["questions"][0]
+        await mp.submit_answer(conn, wrong_for(q))  # 首错未判决：不推
+        await drain_tasks()
+        assert progress_pushes(conn) == []
+
+        conn2 = make_conn(count=5, token="", mcp=FakeMCPClient())  # 未配 token：整体关闭
+        await mp.start_practice(conn2, difficulty="一上")
+        await mp.submit_answer(conn2, str(mp.store.get(conn2.device_id)["questions"][0]["answer"]))
+        await drain_tasks()
+        assert progress_pushes(conn2) == []
+
+        conn3 = make_conn(count=5, token="tk")  # 设备未注册 MCP 工具：静默跳过
+        await mp.start_practice(conn3, difficulty="一上")
+        await mp.submit_answer(conn3, str(mp.store.get(conn3.device_id)["questions"][0]["answer"]))
+        await drain_tasks()
+        assert progress_pushes(conn3) == []
+
+        conn4 = make_conn(count=5, token="tk", mcp=FakeMCPClient(tools=()))  # 无 update_progress
+        await mp.start_practice(conn4, difficulty="一上")
+        await mp.submit_answer(conn4, str(mp.store.get(conn4.device_id)["questions"][0]["answer"]))
+        await drain_tasks()
+        assert progress_pushes(conn4) == []
+
+    async def test_wrap_up_pushes_pure_aggregate_after_report(self, monkeypatch):
+        async def fake_progress(mac, token):
+            return dict(AGG)
+
+        monkeypatch.setattr("config.manage_api_client.get_math_practice_progress", fake_progress)
+        conn = make_conn(count=5, token="tk", mcp=FakeMCPClient())
+        await mp.start_practice(conn, difficulty="一上")
+        for qq in list(mp.store.get(conn.device_id)["questions"]):
+            await mp.submit_answer(conn, str(qq["answer"]))
+        await drain_tasks()
+        pushes = progress_pushes(conn)
+        assert pushes  # 全程 4 次判决推进 + 收尾各一推
+        assert pushes[-1]["arguments"] == AGG  # 收尾推纯聚合（record 落库后的口径）
+
+    async def test_slow_report_holds_lock_against_new_round_push(self, monkeypatch, _real_sleep):
+        """收尾上报整体持锁：慢上报期间新一轮的判决推送只能排其后，收尾推送
+        不会被后判决先落屏再顶回旧聚合（#29 评审发现的回退竞态）。"""
+        async def slow_report(conn, s):
+            await asyncio.sleep(0.2)  # _real_sleep 已替换为真等待
+
+        async def fake_progress(mac, token):
+            return dict(AGG)
+
+        monkeypatch.setattr(mp, "_report_result", slow_report)
+        monkeypatch.setattr("config.manage_api_client.get_math_practice_progress", fake_progress)
+        conn = make_conn(count=5, token="tk", mcp=FakeMCPClient())
+        await mp.start_practice(conn, difficulty="一上")
+        for qq in list(mp.store.get(conn.device_id)["questions"]):
+            await mp.submit_answer(conn, str(qq["answer"]))  # 收尾：慢上报持锁中
+        await mp.start_practice(conn, difficulty="一上")  # 立即开新一轮（进程内续接 seed=5）
+        await mp.submit_answer(conn, str(mp.store.get(conn.device_id)["questions"][0]["answer"]))
+        await drain_tasks()
+        last = progress_pushes(conn)[-1]["arguments"]
+        assert last["currentStreak"] == 6  # 新一轮实时值最后落屏，未被旧聚合顶回
+
+    async def test_timeout_skip_and_chain_stop_push(self, monkeypatch, _real_sleep):
+        async def fake_progress(mac, token):
+            return dict(AGG)
+
+        monkeypatch.setattr("config.manage_api_client.get_math_practice_progress", fake_progress)
+        conn = make_conn(nudge=0.05, count=5, token="tk", mcp=FakeMCPClient())
+        await mp.start_practice(conn, difficulty="一上")
+        await asyncio.sleep(0.5)  # 连续两次超时跳过 → 停链（会话保留供 resume）
+        await drain_tasks()
+        args = [p["arguments"] for p in progress_pushes(conn)]
+        assert args and all(a["currentStreak"] == 0 for a in args)  # 超时清零后的推送
 

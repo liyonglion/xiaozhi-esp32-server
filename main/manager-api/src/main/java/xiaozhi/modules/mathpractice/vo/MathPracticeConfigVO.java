@@ -22,6 +22,9 @@ public class MathPracticeConfigVO {
     @Schema(description = "每轮题量")
     private Integer questionCount;
 
+    @Schema(description = "最近一场收尾连对值（xiaozhi-server 续接 seed 用；未配置设备也返回）")
+    private Integer streakEnd;
+
     @Schema(description = "更新时间")
     private Date updatedAt;
 }

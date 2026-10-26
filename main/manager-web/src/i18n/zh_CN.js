@@ -1711,5 +1711,6 @@ export default {
   'mathPractice.recordTime': '练习时间',
   'mathPractice.recordPreset': '难度',
   'mathPractice.recordScore': '答对/题量',
+  'mathPractice.recordStreak': '最高连对',
   'mathPractice.recordDuration': '用时',
 }

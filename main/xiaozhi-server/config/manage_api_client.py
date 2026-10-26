@@ -254,7 +254,8 @@ async def get_correct_words(instance, mac_address: str) -> Optional[Dict]:
 
 @api_guard("获取口算练习配置失败")
 async def get_math_practice_config(instance, mac_address: str) -> Optional[Dict]:
-    """获取设备口算练习配置（admin 家长页配置；未配置返回 None 由插件回落默认档）。
+    """获取设备口算练习配置（admin 家长页配置；#29 起未配置也返回体——preset 等
+    字段为空由插件回落默认档，streakEnd 随体捎回供续接）。
 
     单次请求不走重试：这处在 start_practice 交互路径上，manager-api 不可达时
     重试会让孩子干等分钟级；配置拉取幂等，失败静默回落默认档即可。
@@ -265,11 +266,26 @@ async def get_math_practice_config(instance, mac_address: str) -> Optional[Dict]
     )
 
 
+@api_guard(None)
+async def get_math_practice_progress(instance, mac_address: str, token: str) -> Optional[Dict]:
+    """获取学习进度全量聚合（#29：P2 屏推送前数据源；固件开机首拉同一接口）。
+
+    单次请求不走重试：推送是旁路，丢一次由下一次判决补上；异常交由调用方
+    静默跳过本次推送。
+    """
+    return await instance._async_request(
+        "GET", "/math-practice/progress",
+        params={"macAddress": mac_address},
+        headers={"X-Progress-Token": token},
+    )
+
+
 @api_guard("上报口算练习记录失败")
 async def report_math_practice(
-    instance, mac_address: str, preset: str, total: int, correct: int, duration_seconds: int
+    instance, mac_address: str, preset: str, total: int, correct: int, duration_seconds: int,
+    streak_end: int = 0, streak_peak: int = 0,
 ) -> Optional[Dict]:
-    """上报一次练习会话结果（#24：一次会话一行只读记录）。
+    """上报一次练习会话结果（#24：一次会话一行只读记录；#29 附连对两值）。
 
     单次请求不走重试：服务端 insert 无幂等键，超时重试可能落两行，
     破坏「一次会话一行」不变量；丢一条可容忍（记录是最小版统计）。
@@ -282,6 +298,8 @@ async def report_math_practice(
             "total": total,
             "correct": correct,
             "durationSeconds": duration_seconds,
+            "streakEnd": streak_end,
+            "streakPeak": streak_peak,
         },
     )
 

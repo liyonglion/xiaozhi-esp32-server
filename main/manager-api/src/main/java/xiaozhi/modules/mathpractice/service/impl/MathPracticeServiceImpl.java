@@ -1,6 +1,7 @@
 package xiaozhi.modules.mathpractice.service.impl;
 
 import java.text.SimpleDateFormat;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
@@ -13,6 +14,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -31,6 +33,7 @@ import xiaozhi.modules.mathpractice.entity.MathPracticeConfigEntity;
 import xiaozhi.modules.mathpractice.entity.MathPracticeRecordEntity;
 import xiaozhi.modules.mathpractice.service.MathPracticeService;
 import xiaozhi.modules.mathpractice.vo.MathPracticeConfigVO;
+import xiaozhi.modules.mathpractice.vo.MathPracticeProgressVO;
 import xiaozhi.modules.security.user.SecurityUser;
 
 @Service
@@ -56,11 +59,14 @@ public class MathPracticeServiceImpl implements MathPracticeService {
     @Override
     public MathPracticeConfigVO getConfigByMac(String macAddress) {
         MathPracticeConfigEntity entity = selectByMac(macAddress);
+        // 未配置也返回体（#29）：streakEnd 续接值随本接口捎回零新请求；
+        // preset 等字段为空由 python 侧回落默认档（#24 决议不变）
+        MathPracticeConfigVO vo = entity == null ? new MathPracticeConfigVO() : toVO(entity);
         if (entity == null) {
-            // 未配置：python 侧回落默认（#24 决议：最终保障默认一上档）
-            return null;
+            vo.setMacAddress(macAddress);
         }
-        return toVO(entity);
+        vo.setStreakEnd(latestStreakEnd(macAddress));
+        return vo;
     }
 
     @Override
@@ -113,8 +119,67 @@ public class MathPracticeServiceImpl implements MathPracticeService {
         entity.setTotal(dto.getTotal());
         entity.setCorrect(dto.getCorrect());
         entity.setDurationSeconds(dto.getDurationSeconds());
+        entity.setStreakEnd(dto.getStreakEnd());
+        entity.setStreakPeak(dto.getStreakPeak());
         entity.setCreatedAt(new Date());
         recordDao.insert(entity);
+    }
+
+    @Override
+    public MathPracticeProgressVO getProgress(String macAddress) {
+        // 今日=自然日、周=7 天滚动（含今日），口径依服务器时区（部署为 UTC+8，#29）
+        ZoneId zone = ZoneId.systemDefault();
+        Date todayStart = Date.from(java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant());
+        Date weekStart = Date.from(java.time.LocalDate.now(zone).minusDays(6).atStartOfDay(zone).toInstant());
+
+        // 近 7 天整段拉回内存聚合：设备=单孩子，会话量级每天个位数，行数天然有界
+        List<MathPracticeRecordEntity> week = recordDao.selectList(
+                new LambdaQueryWrapper<MathPracticeRecordEntity>()
+                        .eq(MathPracticeRecordEntity::getMacAddress, macAddress)
+                        .ge(MathPracticeRecordEntity::getCreatedAt, weekStart));
+        int weekCorrect = 0, weekTotal = 0, todayCorrect = 0, todayTotal = 0, todayMaxStreak = 0;
+        for (MathPracticeRecordEntity e : week) {
+            weekCorrect += nvl(e.getCorrect());
+            weekTotal += nvl(e.getTotal());
+            if (e.getCreatedAt() != null && !e.getCreatedAt().before(todayStart)) { // 列可空，防 NPE
+                todayCorrect += nvl(e.getCorrect());
+                todayTotal += nvl(e.getTotal());
+                todayMaxStreak = Math.max(todayMaxStreak, nvl(e.getStreakPeak()));
+            }
+        }
+
+        List<Object> best = recordDao.selectObjs(new QueryWrapper<MathPracticeRecordEntity>()
+                .select("MAX(streak_peak) AS streak_peak")
+                .eq("mac_address", macAddress));
+        int bestStreak = best.isEmpty() || best.get(0) == null ? 0 : ((Number) best.get(0)).intValue();
+
+        List<MathPracticeRecordEntity> recent = recordDao.selectList(
+                new LambdaQueryWrapper<MathPracticeRecordEntity>()
+                        .eq(MathPracticeRecordEntity::getMacAddress, macAddress)
+                        .orderByDesc(MathPracticeRecordEntity::getCreatedAt)
+                        .orderByDesc(MathPracticeRecordEntity::getId) // 同秒并列的确定性 tiebreaker
+                        .last("LIMIT 5"));
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        List<Map<String, Object>> sessions = recent.stream().map(e -> {
+            Map<String, Object> item = new java.util.LinkedHashMap<>();
+            item.put("time", e.getCreatedAt() == null ? null : fmt.format(e.getCreatedAt()));
+            item.put("correct", e.getCorrect());
+            item.put("total", e.getTotal());
+            item.put("streakPeak", e.getStreakPeak());
+            return item;
+        }).collect(Collectors.toList());
+
+        MathPracticeProgressVO vo = new MathPracticeProgressVO();
+        vo.setTodayCorrect(todayCorrect);
+        vo.setTodayTotal(todayTotal);
+        vo.setTodayMaxStreak(todayMaxStreak);
+        vo.setCurrentStreak(recent.isEmpty() ? 0 : nvl(recent.get(0).getStreakEnd()));
+        vo.setBestStreak(bestStreak);
+        vo.setWeekCorrect(weekCorrect);
+        vo.setWeekTotal(weekTotal);
+        vo.setWeekAccuracy(weekTotal == 0 ? 0 : Math.round(weekCorrect * 100.0f / weekTotal));
+        vo.setRecentSessions(sessions);
+        return vo;
     }
 
     @Override
@@ -142,6 +207,7 @@ public class MathPracticeServiceImpl implements MathPracticeService {
                     item.put("total", entity.getTotal());
                     item.put("correct", entity.getCorrect());
                     item.put("durationSeconds", entity.getDurationSeconds());
+                    item.put("streakPeak", entity.getStreakPeak());
                     item.put("createdAt", entity.getCreatedAt() == null ? null : fmt.format(entity.getCreatedAt()));
                     return item;
                 })
@@ -153,6 +219,21 @@ public class MathPracticeServiceImpl implements MathPracticeService {
         LambdaQueryWrapper<MathPracticeConfigEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MathPracticeConfigEntity::getMacAddress, macAddress);
         return configDao.selectOne(wrapper);
+    }
+
+    /** 最近一场记录的 streak_end（无记录为 0）：续接 seed 与 currentStreak 的口径 */
+    private int latestStreakEnd(String macAddress) {
+        MathPracticeRecordEntity latest = recordDao.selectOne(
+                new LambdaQueryWrapper<MathPracticeRecordEntity>()
+                        .eq(MathPracticeRecordEntity::getMacAddress, macAddress)
+                        .orderByDesc(MathPracticeRecordEntity::getCreatedAt)
+                        .orderByDesc(MathPracticeRecordEntity::getId) // 同秒并列的确定性 tiebreaker
+                        .last("LIMIT 1"));
+        return latest == null ? 0 : nvl(latest.getStreakEnd());
+    }
+
+    private static int nvl(Integer v) {
+        return v == null ? 0 : v;
     }
 
     /** updateById 默认忽略 null 字段，typeIds 置空（=回落预设默认）会静默失效，显式 SET 全列 */

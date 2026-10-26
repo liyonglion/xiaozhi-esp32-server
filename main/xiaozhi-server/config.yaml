@@ -166,6 +166,7 @@ plugins:
   math_practice:
     count: 10 # 每轮题量（5~20，#23 决议默认 10）
     nudge_seconds: 30 # 无作答轻推间隔（两级超时，#23 决议；0 关闭）
+    progress_token: "" # 学习进度聚合接口令牌（#29；与 manager-api math-practice.progress-token 及固件约定，空=关闭推送）
   search_from_ragflow:
     # 知识库的描述信息，方便大语言模型知道什么时候调用
     description: "当用户问xxx时，调用本方法，使用知识库中的信息回答问题"

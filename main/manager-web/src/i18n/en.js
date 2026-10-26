@@ -1711,5 +1711,6 @@ export default {
   'mathPractice.recordTime': 'Time',
   'mathPractice.recordPreset': 'Level',
   'mathPractice.recordScore': 'Correct / Total',
+  'mathPractice.recordStreak': 'Best Streak',
   'mathPractice.recordDuration': 'Duration',
 }

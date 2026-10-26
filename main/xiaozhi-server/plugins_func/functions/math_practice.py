@@ -18,6 +18,7 @@ import time
 from typing import TYPE_CHECKING
 
 from core.providers.tts.dto.dto import ContentType, SentenceType, TTSMessageDTO
+from core.providers.tools.device_mcp import call_mcp_tool
 from mcp_services.math_practice import explanations, generator
 from mcp_services.math_practice.session import new_session, store, view_text
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
@@ -28,7 +29,9 @@ if TYPE_CHECKING:
 TAG = __name__
 
 _timers: dict[str, asyncio.Task] = {}
-_report_tasks: set[asyncio.Task] = set()  # 持引用防 GC；fire-and-forget 上报
+_report_tasks: set[asyncio.Task] = set()  # 持引用防 GC；fire-and-forget 上报/推送
+_last_streak_end: dict[str, int] = {}  # 设备最近一次收尾上报的 streak（进程内续接兜底，#29）
+_push_locks: dict[str, asyncio.Lock] = {}  # per-device FIFO：推送按判决顺序落屏
 
 _PRESET_KEYS = {
     "学前": "preschool", "幼儿园": "preschool",
@@ -66,32 +69,38 @@ async def _fetch_device_config(conn: "ConnectionHandler") -> dict | None:
 MIN_COUNT, MAX_COUNT = 5, 20  # 每轮题量档位（#23 决议：默认 10，可配 5~20，三层统一）
 
 
-async def _device_overrides(conn: "ConnectionHandler", difficulty: str) -> tuple[str, list[str], int]:
+async def _device_overrides(conn: "ConnectionHandler", difficulty: str) -> tuple[str, list[str], int, int]:
     """解析生效配置：远端设备配置 > difficulty 入参 > config.yaml 默认（#24 决议）。
 
     远端字段不可信（可能过期/手改库），逐项校验后采用，非法值忽略。
+    返回 (preset, type_ids, count, streak_seed)；seed 取 record 口径与进程内口径的较大值
+    （#29：record 落库有延迟，进程内值兜住「连玩两轮」的续接）。
     """
     preset = _resolve_preset(difficulty)
     type_ids = list(generator.PRESETS[preset])
     count = max(MIN_COUNT, min(MAX_COUNT, int(_plugin_cfg(conn).get("count", 10))))
-    if not conn.config.get("read_config_from_api"):
-        return preset, type_ids, count
-    try:
-        remote = await _fetch_device_config(conn)
-    except Exception:
-        remote = None  # 配置页不可用不拦练习，回落默认
-    if remote:
-        if remote.get("preset") in generator.PRESETS:
-            preset = remote["preset"]
-            type_ids = list(generator.PRESETS[preset])
-        ids = [t for t in (remote.get("typeIds") or []) if t in generator.TYPES]
-        if ids:
-            type_ids = ids
+    seed = _last_streak_end.get(conn.device_id, 0)
+    if conn.config.get("read_config_from_api"):
         try:
-            count = max(MIN_COUNT, min(MAX_COUNT, int(remote.get("questionCount") or count)))
-        except (TypeError, ValueError):
-            pass
-    return preset, type_ids, count
+            remote = await _fetch_device_config(conn)
+        except Exception:
+            remote = None  # 配置页不可用不拦练习，回落默认
+        if remote:
+            if remote.get("preset") in generator.PRESETS:
+                preset = remote["preset"]
+                type_ids = list(generator.PRESETS[preset])
+            ids = [t for t in (remote.get("typeIds") or []) if t in generator.TYPES]
+            if ids:
+                type_ids = ids
+            try:
+                count = max(MIN_COUNT, min(MAX_COUNT, int(remote.get("questionCount") or count)))
+            except (TypeError, ValueError):
+                pass
+            try:
+                seed = max(seed, int(remote.get("streakEnd") or 0))
+            except (TypeError, ValueError):
+                pass
+    return preset, type_ids, count, seed
 
 
 async def _report_result(conn: "ConnectionHandler", s: dict) -> None:
@@ -104,20 +113,130 @@ async def _report_result(conn: "ConnectionHandler", s: dict) -> None:
         s["total"],
         s["score"],
         int(time.time() - s["started_at"]),
+        s["streak"],
+        s["streak_peak"],
     )
 
 
+async def _report_and_push(conn: "ConnectionHandler", s: dict) -> None:
+    """收尾：先上报再推纯聚合，整体持 per-device 锁——慢上报期间新一轮的判决推送
+    只能排队其后，收尾推送不会被后判决顶回旧值（#29 FIFO 序保证）。"""
+    try:
+        async with _device_push_lock(conn.device_id):
+            await _report_result(conn, s)  # api_guard 兜底不抛错；失败也继续推（少算好过不推）
+            await _push_locked(conn, None)
+    except Exception as e:  # 收尾旁路，绝不影响播报主流程
+        try:
+            conn.logger.bind(tag=TAG).warning(f"学习进度收尾推送中断: {e}")
+        except Exception:
+            pass
+
+
 def _report_in_background(conn: "ConnectionHandler", s: dict) -> None:
-    """fire-and-forget 上报：记录接口带重试（最长分钟级），不能拖住收尾播报。"""
-    task = asyncio.create_task(_report_result(conn, s))
+    """fire-and-forget 上报：记录接口带重试（最长分钟级），不能拖住收尾播报。
+
+    收尾推送排在上报之后（record 落库后聚合才含本会话，#29）；
+    同步记进程内 streak_end，供「连玩两轮」免等落库即续接。
+    """
+    _remember_streak_end(conn.device_id, s["streak"])
+    task = asyncio.create_task(_report_and_push(conn, s))
     _report_tasks.add(task)
     task.add_done_callback(_report_tasks.discard)
 
 
+def _push_in_background(conn: "ConnectionHandler", s: dict) -> None:
+    """判决推进后的进度推送（#29：固件无状态，全量 8 字段）。"""
+    task = asyncio.create_task(_push_progress(conn, s))
+    _report_tasks.add(task)
+    task.add_done_callback(_report_tasks.discard)
+
+
+def _remember_streak_end(device_id: str, streak: int) -> None:
+    if len(_last_streak_end) > 1024:  # ponytail: 粗上限防连接churn膨胀；真到千设备量级再换 LRU
+        _last_streak_end.clear()
+    _last_streak_end[device_id] = streak
+
+
+def _device_push_lock(device_id: str) -> asyncio.Lock:
+    if len(_push_locks) > 1024:  # ponytail: 同上，与 _last_streak_end 同一上限策略
+        _push_locks.clear()
+    return _push_locks.setdefault(device_id, asyncio.Lock())
+
+
+def _overlay_live(agg: dict, s: dict) -> dict:
+    """会话进行中的推送：历史聚合 + 本会话实时值（record 仅收尾落库，中间态由会话补）。
+
+    ponytail: 假定本会话落在「今日/本周」——跨零点续练会记入今日，落库后由
+    下一次聚合自然纠正；固件侧另有 NVS 跨天清零兜底。
+    """
+    week_correct = int(agg.get("weekCorrect", 0)) + s["score"]
+    week_total = int(agg.get("weekTotal", 0)) + s["answered"]
+    sessions = list(agg.get("recentSessions") or [])
+    if s["answered"] > 0:
+        sessions = [{
+            "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(s["started_at"])),
+            "correct": s["score"],
+            "total": s["answered"],
+            "streakPeak": s["streak_peak"],
+        }, *sessions]
+    # 整数半进位（floor(x+0.5)），与 Java Math.round 口径一致，防 .5 处来回跳 1
+    accuracy = (week_correct * 200 + week_total) // (week_total * 2) if week_total else 0
+    return {
+        "todayCorrect": int(agg.get("todayCorrect", 0)) + s["score"],
+        "todayTotal": int(agg.get("todayTotal", 0)) + s["answered"],
+        "todayMaxStreak": max(int(agg.get("todayMaxStreak", 0)), s["streak_peak"]),
+        "currentStreak": s["streak"],
+        "bestStreak": max(int(agg.get("bestStreak", 0)), s["streak_peak"]),
+        "weekAccuracy": accuracy,
+        "recentSessions": sessions[:5],
+    }
+
+
+async def _push_locked(conn: "ConnectionHandler", s: dict | None) -> None:
+    """锁内推送：s=None 推纯聚合（收尾后），s 非 None 叠加本会话实时值。
+
+    未配 token / 设备未注册 update_progress / 未就绪：静默跳过（旧固件、未部署）。
+    """
+    from config import manage_api_client
+
+    token = _plugin_cfg(conn).get("progress_token", "")
+    mcp = getattr(conn, "mcp_client", None)
+    if not token or mcp is None or not mcp.has_tool("update_progress"):
+        return
+    if not await mcp.is_ready():
+        return
+    try:
+        agg = await manage_api_client.get_math_practice_progress(conn.device_id, token)
+    except Exception:
+        return  # 聚合拉取失败跳过本次，下一次判决补推
+    if agg is None:
+        return
+    payload = _overlay_live(agg, s) if s is not None else agg
+    await call_mcp_tool(conn, mcp, "update_progress", payload)
+
+
+async def _push_progress(conn: "ConnectionHandler", s: dict | None) -> None:
+    """判决后的推送入口：per-device FIFO 锁内执行（按判决顺序落屏，#29）。"""
+    try:
+        async with _device_push_lock(conn.device_id):
+            await _push_locked(conn, s)
+    except Exception as e:  # 推送是旁路，绝不影响答题主流程
+        try:
+            conn.logger.bind(tag=TAG).warning(f"学习进度推送中断: {e}")
+        except Exception:
+            pass
+
+
 def _advance(s: dict, scored: bool) -> dict:
-    """推进到下一题（巩固题不计题量、不循环）；主题全部作答完毕时 answered == total。"""
+    """推进到下一题（巩固题不计题量、不循环）；主题全部作答完毕时 answered == total。
+
+    streak（#29）：主题答对 +1、判错/超时清零；巩固题不参与（学习环节非考核）。
+    """
     role = s["questions"][s["idx"]]["role"]
     is_main = role == "main"
+    streak = s["streak"]
+    if is_main:
+        streak = s["streak"] + 1 if scored else 0
     return {
         **s,
         "idx": s["idx"] + 1,
@@ -125,6 +244,8 @@ def _advance(s: dict, scored: bool) -> dict:
         "score": s["score"] + (1 if scored and is_main else 0),
         "answered": s["answered"] + (1 if is_main else 0),
         "main_no": s["main_no"] + (1 if is_main else 0),
+        "streak": streak,
+        "streak_peak": max(s["streak_peak"], streak),
     }
 
 
@@ -174,6 +295,7 @@ async def _respond_next(conn: "ConnectionHandler", s: dict, scored: bool, lead: 
         )
     saved = store.save({**s2, "timeout_skips": 0})  # 有作答即重置连续超时计数
     _bump_timer(conn, saved)
+    _push_in_background(conn, saved)
     await _show_question(conn, saved)
     return ActionResponse(
         action=Action.REQLLM,
@@ -230,8 +352,10 @@ async def _nudge_loop(conn: "ConnectionHandler", device_id: str, token: float, n
             # 连续无作答视为被动中断（跑题/离开）：停超时链保留会话供 resume，
             # 避免自动跳完全轮并上报失真记录（session.py 生命周期决议）
             _timers.pop(device_id, None)  # 本 task 即链尾，清掉自身引用
+            _push_in_background(conn, saved)  # 停链也推一次（#29：屏停在本场实时值）
             await _say(conn, "我们先休息一下，想继续练口算随时叫我哦。")
             return
+        _push_in_background(conn, saved)  # 超时跳过=不会，streak 已清零（#29）
         await _say(conn, f"下一题：{view_text(saved)}")
         await _show_question(conn, saved)
         _start_timer(conn, saved)
@@ -290,10 +414,10 @@ async def start_practice(conn: "ConnectionHandler", difficulty: str = "", mode: 
                 "孩子回答后调用 submit_answer(answer=孩子的原话)。"
             ),
         )
-    preset, type_ids, total = await _device_overrides(conn, difficulty)
+    preset, type_ids, total, streak_seed = await _device_overrides(conn, difficulty)
     questions = generator.generate_practice(type_ids, total, random.Random())
     total = len(questions)  # 小题库（如仅 A1 去重后 12 题）可能不足 count，对齐防越界
-    s = store.save(new_session(device_id, questions, total, preset))
+    s = store.save(new_session(device_id, questions, total, preset, streak=streak_seed))
     _bump_timer(conn, s)
     await _show_question(conn, s)
     return ActionResponse(
@@ -387,8 +511,10 @@ async def submit_answer(conn: "ConnectionHandler", answer: str):
         "timeout_skips": 0,
         "answered": s["answered"] + 1,
         "main_no": s["main_no"] + 1,
+        "streak": 0,  # 主题二错判负，连对清零（#29）
     })
     _bump_timer(conn, saved)
+    _push_in_background(conn, saved)
     await _show_question(conn, saved)
     return ActionResponse(
         action=Action.REQLLM,

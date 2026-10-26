@@ -58,7 +58,7 @@ public class ConfigController {
     }
 
     @PostMapping("math-practice")
-    @Operation(summary = "获取设备口算练习配置（未配置返回 null，由 python 侧回落默认档）")
+    @Operation(summary = "获取设备口算练习配置（#29：未配置也返回体，preset 等空由 python 回落默认档；streakEnd 随体捎回）")
     public Result<MathPracticeConfigVO> getMathPracticeConfig(@Valid @RequestBody CorrectWordsDTO dto) {
         ValidatorUtils.validateEntity(dto);
         MathPracticeConfigVO vo = mathPracticeService.getConfigByMac(dto.getMacAddress());
