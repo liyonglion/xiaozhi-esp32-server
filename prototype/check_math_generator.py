@@ -9,7 +9,7 @@ import random
 
 from math_generator import (
     FALLBACK_PRESET, PRESETS, TYPES, canonical_key, generate_practice,
-    judge, normalize_answer,
+    has_zero_operand, judge, normalize_answer,
 )
 
 N = 200  # 每题型抽检量（票要求 ≥10，加严到 200）
@@ -74,9 +74,12 @@ def main() -> None:
 
     # 2) 去重：交换律同题归一 + 整套无重复
     rng = random.Random(1)
-    set_a = generate_practice(["A2"], 30, rng)
-    assert len({canonical_key(i) for i in set_a}) == 30
+    set_a = generate_practice(["A2"], 20, rng)
+    assert len({canonical_key(i) for i in set_a}) == 20
     assert canonical_key({"type": "A2", "meta": {"a": 3, "b": 5}}) == canonical_key({"type": "A2", "meta": {"a": 5, "b": 3}})
+    # 含 0 算术题每套 ≤1 道（R2 决议）
+    zs = generate_practice(["A1", "S1"], 10, rng)
+    assert len(zs) == 10 and sum(has_zero_operand(i) for i in zs) <= 1
 
     # 3) 答案归一化（ASR 口语 → 标准答案）
     cases_int = [("12", 12), ("十二", 12), ("一十二", 12), ("二十", 20), ("十五", 15),

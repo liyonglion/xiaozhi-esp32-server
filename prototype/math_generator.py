@@ -229,7 +229,7 @@ TYPES: dict[str, dict] = {
 # 年级预设（#24 决议；映射依据教材单元，家长可展开微调）
 PRESETS: dict[str, list[str]] = {
     "preschool": ["A1", "S1", "CMP5", "DEC", "PAT20"],
-    "g1a": ["A1", "A2", "A3", "S1", "S2", "A4", "CMP10", "DEC"],
+    "g1a": ["A2", "A3", "S2", "A4", "CMP10", "DEC"],  # 5 以内档归学前（R1 决议）
     "g1b": ["S3", "S4", "A5", "S5", "A6", "S7", "ADJ100"],
     "g2a": ["M1", "M2", "A7", "S8"],
     "g2b": ["D1", "D2", "M2", "M3", "A7", "S8"],
@@ -250,9 +250,16 @@ def canonical_key(item: dict) -> tuple:
     return (tid, item["text"])
 
 
+def has_zero_operand(item: dict) -> bool:
+    """算术题是否含 0 操作数（10-0= 教材合法但一套多道显得水）。"""
+    m = item["meta"]
+    return item["type"][0] in "AS" and 0 in (m.get("a", -1), m.get("b", -1))
+
+
 def generate_practice(type_ids: list[str], count: int, rng: Rng) -> list[dict]:
-    """按题型列表轮转出一套 count 题，交换律同题去重。"""
+    """按题型列表轮转出一套 count 题，交换律同题去重，含 0 算术题每套 ≤1 道（R2 决议）。"""
     seen: set = set()
+    zero_used = False
     out: list[dict] = []
     for i in range(count * 30):
         if len(out) >= count:
@@ -260,9 +267,14 @@ def generate_practice(type_ids: list[str], count: int, rng: Rng) -> list[dict]:
         tid = type_ids[i % len(type_ids)]
         item = TYPES[tid]["gen"](rng)
         key = canonical_key(item)
-        if key not in seen:
-            seen.add(key)
-            out.append(item)
+        if key in seen:
+            continue
+        if has_zero_operand(item):
+            if zero_used:
+                continue
+            zero_used = True
+        seen.add(key)
+        out.append(item)
     return out
 
 
