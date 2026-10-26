@@ -26,6 +26,7 @@ def new_session(device_id: str, questions: list[dict], total: int, preset: str =
         "score": 0,
         "answered": 0,
         "attempts": 0,
+        "timeout_skips": 0,  # 连续超时跳过计数（≥2 停超时链保留会话，#23 被动中断）
         "started_at": now,
         "last_active": now,
     }

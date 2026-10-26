@@ -117,6 +117,13 @@ class TestGenerator:
 
 
 class TestExplanations:
+    def test_carry_add_picks_big_by_value(self):
+        """47+8 须看大数 47、拆 8（按个位会把 8 当大数，讲解错误）。"""
+        m = explanations.build_material({"type": "A6", "kind": "int", "answer": 55,
+                                         "text": "47+8=", "meta": {"a": 47, "b": 8}})
+        assert "看大数47，把8拆成3和5" in m["steps"]
+        assert "47+3=50" in m["steps"] and "50+5=55" in m["steps"]
+
     def test_every_type_has_material(self):
         for tid, t in generator.TYPES.items():
             rng = random.Random(hash(tid) % 2**31)
@@ -359,6 +366,16 @@ class TestNudgeTimer:
         assert conn.tts.stored == []
         assert mp.store.get(conn.device_id) is None
 
+    async def test_timeout_chain_stops_after_two_skips(self):
+        """连续两次超时跳过后停超时链，保留会话供 resume（不自动跑完上报失真记录）。"""
+        conn = make_conn(nudge=0.05, count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        await asyncio.sleep(0.5)  # 足够跳过 ≥2 题
+        s = mp.store.get(conn.device_id)
+        assert s is not None and s["timeout_skips"] >= 2  # 会话保留未跑完
+        assert any("休息一下" in t for t in conn.tts.stored)
+        assert conn.device_id not in mp._timers  # 链已停
+
 
 class TestDeviceConfigAndReport:
     """切片②：设备级配置（admin 配置页）与练习记录上报。"""
@@ -396,8 +413,10 @@ class TestDeviceConfigAndReport:
         conn.config["read_config_from_api"] = True
         await mp.start_practice(conn, difficulty="")
         s = mp.store.get(conn.device_id)
-        assert s["preset"] == "g1a" and s["total"] == 20  # 非法预设回落，99 钳到 20
-        assert "BAD" not in {q["type"] for q in s["questions"]}
+        # 非法预设回落 g1a；BAD 被滤掉只剩 A1（小题库），99 钳 20 后 total 对齐实际题数
+        assert s["preset"] == "g1a"
+        assert {q["type"] for q in s["questions"]} == {"A1"}
+        assert s["total"] == len(s["questions"]) < 20
 
     async def test_no_api_mode_never_fetches(self, monkeypatch):
         called = []
@@ -443,4 +462,27 @@ class TestDeviceConfigAndReport:
         if mp._report_tasks:
             await asyncio.wait_for(asyncio.gather(*list(mp._report_tasks)), timeout=1)
         assert len(reported) == 1 and reported[0]["total"] == 5
+
+    async def test_small_pool_total_clamped(self, monkeypatch):
+        """单题型 A1 去重后仅 12 题：total 须对齐实际题数，防收尾前越界。"""
+        async def fake_fetch(conn):
+            return {"preset": "preschool", "typeIds": ["A1"], "questionCount": 20}
+
+        monkeypatch.setattr(mp, "_fetch_device_config", fake_fetch)
+        conn = make_conn()
+        conn.config["read_config_from_api"] = True
+        await mp.start_practice(conn, difficulty="一上")
+        s = mp.store.get(conn.device_id)
+        assert s["total"] == len(s["questions"]) <= 12
+        for qq in s["questions"]:  # 全程答完不越界
+            await mp.submit_answer(conn, str(qq["answer"]))
+        assert mp.store.get(conn.device_id) is None
+
+    async def test_answer_resets_timeout_skips(self):
+        conn = make_conn(nudge=0.05, count=5)
+        await mp.start_practice(conn, difficulty="一上")
+        mp.store.save({**mp.store.get(conn.device_id), "timeout_skips": 2})
+        s = mp.store.get(conn.device_id)
+        await mp.submit_answer(conn, str(s["questions"][s["idx"]]["answer"]))
+        assert mp.store.get(conn.device_id)["timeout_skips"] == 0
 

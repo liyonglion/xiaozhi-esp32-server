@@ -254,8 +254,12 @@ async def get_correct_words(instance, mac_address: str) -> Optional[Dict]:
 
 @api_guard("获取口算练习配置失败")
 async def get_math_practice_config(instance, mac_address: str) -> Optional[Dict]:
-    """获取设备口算练习配置（admin 家长页配置；未配置返回 None 由插件回落默认档）"""
-    return await instance._execute_async_request(
+    """获取设备口算练习配置（admin 家长页配置；未配置返回 None 由插件回落默认档）。
+
+    单次请求不走重试：这处在 start_practice 交互路径上，manager-api 不可达时
+    重试会让孩子干等分钟级；配置拉取幂等，失败静默回落默认档即可。
+    """
+    return await instance._async_request(
         "POST", "/config/math-practice",
         json={"macAddress": mac_address}
     )

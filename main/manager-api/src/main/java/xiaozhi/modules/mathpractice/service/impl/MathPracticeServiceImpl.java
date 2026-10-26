@@ -13,6 +13,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
@@ -96,10 +97,10 @@ public class MathPracticeServiceImpl implements MathPracticeService {
                 entity.setId(existing.getId());
                 entity.setCreator(existing.getCreator());
                 entity.setCreatedAt(existing.getCreatedAt());
-                configDao.updateById(entity);
+                updateAllFields(entity);
             }
         } else {
-            configDao.updateById(entity);
+            updateAllFields(entity);
         }
         return toVO(entity);
     }
@@ -152,6 +153,17 @@ public class MathPracticeServiceImpl implements MathPracticeService {
         LambdaQueryWrapper<MathPracticeConfigEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(MathPracticeConfigEntity::getMacAddress, macAddress);
         return configDao.selectOne(wrapper);
+    }
+
+    /** updateById 默认忽略 null 字段，typeIds 置空（=回落预设默认）会静默失效，显式 SET 全列 */
+    private void updateAllFields(MathPracticeConfigEntity entity) {
+        configDao.update(null, new LambdaUpdateWrapper<MathPracticeConfigEntity>()
+                .eq(MathPracticeConfigEntity::getId, entity.getId())
+                .set(MathPracticeConfigEntity::getPreset, entity.getPreset())
+                .set(MathPracticeConfigEntity::getTypeIds, entity.getTypeIds())
+                .set(MathPracticeConfigEntity::getQuestionCount, entity.getQuestionCount())
+                .set(MathPracticeConfigEntity::getUpdater, entity.getUpdater())
+                .set(MathPracticeConfigEntity::getUpdatedAt, entity.getUpdatedAt()));
     }
 
     /** 设备必须存在且属于当前用户（家长只能配置自己的设备） */

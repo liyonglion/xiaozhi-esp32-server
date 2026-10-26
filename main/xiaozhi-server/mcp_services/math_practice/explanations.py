@@ -9,8 +9,9 @@ from .generator import cn_int
 
 
 def _carry_add(a: int, b: int, ans: int) -> dict:
-    """凑十法：个位相加满十。"""
-    big, small = (a, b) if a % 10 >= b % 10 else (b, a)
+    """凑十法：个位相加满十。按数值取大数（47+8 应看大数 47、拆 8，
+    而非按个位把 8 当大数）；进位条件 a%10+b%10>=10 保证 small >= take。"""
+    big, small = (a, b) if a >= b else (b, a)
     take = 10 - big % 10
     if small == take:
         steps = f"{big}加{small}正好凑成{big + take}"

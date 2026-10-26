@@ -172,7 +172,7 @@ async def _respond_next(conn: "ConnectionHandler", s: dict, scored: bool, lead: 
                 "最后问孩子要不要再来一轮；孩子同意就调用 start_practice 重新开始。"
             ),
         )
-    saved = store.save(s2)
+    saved = store.save({**s2, "timeout_skips": 0})  # 有作答即重置连续超时计数
     _bump_timer(conn, saved)
     await _show_question(conn, saved)
     return ActionResponse(
@@ -224,7 +224,14 @@ async def _nudge_loop(conn: "ConnectionHandler", device_id: str, token: float, n
             _report_in_background(conn, s2)
             await _say(conn, f"练习结束，{_wrap_up_text(s2)}，你很棒！")
             return
-        saved = store.save(s2)
+        skips = s.get("timeout_skips", 0) + 1
+        saved = store.save({**s2, "timeout_skips": skips})
+        if skips >= 2:
+            # 连续无作答视为被动中断（跑题/离开）：停超时链保留会话供 resume，
+            # 避免自动跳完全轮并上报失真记录（session.py 生命周期决议）
+            _timers.pop(device_id, None)  # 本 task 即链尾，清掉自身引用
+            await _say(conn, "我们先休息一下，想继续练口算随时叫我哦。")
+            return
         await _say(conn, f"下一题：{view_text(saved)}")
         await _show_question(conn, saved)
         _start_timer(conn, saved)
@@ -285,6 +292,7 @@ async def start_practice(conn: "ConnectionHandler", difficulty: str = "", mode: 
         )
     preset, type_ids, total = await _device_overrides(conn, difficulty)
     questions = generator.generate_practice(type_ids, total, random.Random())
+    total = len(questions)  # 小题库（如仅 A1 去重后 12 题）可能不足 count，对齐防越界
     s = store.save(new_session(device_id, questions, total, preset))
     _bump_timer(conn, s)
     await _show_question(conn, s)
@@ -353,7 +361,7 @@ async def submit_answer(conn: "ConnectionHandler", answer: str):
         return await _respond_next(conn, s, scored=False, lead=lead)
 
     if s["attempts"] == 0:  # 首错：鼓励重试，不透露答案（#23 决议）
-        saved = store.save({**s, "attempts": 1})
+        saved = store.save({**s, "attempts": 1, "timeout_skips": 0})
         _bump_timer(conn, saved)
         return ActionResponse(
             action=Action.REQLLM,
@@ -376,6 +384,7 @@ async def submit_answer(conn: "ConnectionHandler", answer: str):
         "questions": questions,
         "idx": s["idx"] + 1,  # 推进到巩固题（原题已判完，answered 计数）
         "attempts": 0,
+        "timeout_skips": 0,
         "answered": s["answered"] + 1,
         "main_no": s["main_no"] + 1,
     })

@@ -14,6 +14,11 @@ export default {
             .fail((err) => {
                 RequestService.clearRequestTime()
                 callback(err)
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getConfig(macAddress, callback)
+                })
             }).send()
     },
 

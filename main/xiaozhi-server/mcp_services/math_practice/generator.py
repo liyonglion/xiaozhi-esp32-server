@@ -325,8 +325,3 @@ def normalize_answer(text: str, kind: str) -> int | str | None:
         n = int(t)
         return n if 0 <= n <= 100 else None
     return _cn_to_int(t)
-
-
-def judge(item: dict, spoken: str) -> bool:
-    got = normalize_answer(spoken, item["kind"])
-    return got is not None and got == item["answer"]
