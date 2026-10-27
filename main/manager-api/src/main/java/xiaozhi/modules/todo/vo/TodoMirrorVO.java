@@ -32,6 +32,9 @@ public class TodoMirrorVO {
     @Schema(description = "待下发标记")
     private boolean pending;
 
+    @Schema(description = "设备在线状态（xiaozhi-server 周期上报，T2）")
+    private boolean deviceOnline;
+
     @Schema(description = "最近一次写入来源")
     private String source;
 

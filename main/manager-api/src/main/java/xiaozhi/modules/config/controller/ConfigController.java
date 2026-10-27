@@ -2,6 +2,7 @@ package xiaozhi.modules.config.controller;
 
 import java.util.List;
 
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,8 +20,11 @@ import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.mathpractice.dto.MathPracticeReportDTO;
 import xiaozhi.modules.mathpractice.service.MathPracticeService;
 import xiaozhi.modules.mathpractice.vo.MathPracticeConfigVO;
+import xiaozhi.modules.todo.dto.TodoOnlineDTO;
 import xiaozhi.modules.todo.dto.TodoReportDTO;
+import xiaozhi.modules.todo.service.TodoOnlineRegistry;
 import xiaozhi.modules.todo.service.TodoService;
+import xiaozhi.modules.todo.vo.TodoMirrorVO;
 
 /**
  * xiaozhi-server 配置获取
@@ -35,6 +39,7 @@ public class ConfigController {
     private final ConfigService configService;
     private final MathPracticeService mathPracticeService;
     private final TodoService todoService;
+    private final TodoOnlineRegistry todoOnlineRegistry;
 
     @PostMapping("server-base")
     @Operation(summary = "服务端获取配置接口")
@@ -81,6 +86,28 @@ public class ConfigController {
     public Result<Void> reportTodoList(@Valid @RequestBody TodoReportDTO dto) {
         ValidatorUtils.validateEntity(dto);
         todoService.reportTodoMirror(dto);
+        return new Result<Void>();
+    }
+
+    @GetMapping("todo-list/pending")
+    @Operation(summary = "拉取待下发清单（#32：60s 同步循环扫描，仅 pending 且同步开关开的设备）")
+    public Result<List<TodoMirrorVO>> getTodoPending() {
+        return new Result<List<TodoMirrorVO>>().ok(todoService.getPendingMirrors());
+    }
+
+    @PostMapping("todo-list/delivered")
+    @Operation(summary = "下发回执（#32：set_todos(replace) receipt ok 后清 pending；镜像已被更新保存时保留 pending）")
+    public Result<Void> reportTodoDelivered(@Valid @RequestBody TodoReportDTO dto) {
+        ValidatorUtils.validateEntity(dto);
+        todoService.markDelivered(dto);
+        return new Result<Void>();
+    }
+
+    @PostMapping("todo-list/online")
+    @Operation(summary = "上报在线 mac 集合（#32：xiaozhi-server 每 60s 全量上报，家长页在线徽标数据源）")
+    public Result<Void> reportTodoOnline(@Valid @RequestBody TodoOnlineDTO dto) {
+        ValidatorUtils.validateEntity(dto);
+        todoOnlineRegistry.reportOnline(dto.getMacs());
         return new Result<Void>();
     }
 }

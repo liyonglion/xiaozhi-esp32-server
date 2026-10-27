@@ -1,5 +1,7 @@
 package xiaozhi.modules.todo.service;
 
+import java.util.List;
+
 import xiaozhi.modules.todo.dto.TodoReportDTO;
 import xiaozhi.modules.todo.vo.TodoMirrorVO;
 
@@ -13,4 +15,13 @@ public interface TodoService {
 
     /** 家长只读查询（校验设备属主） */
     TodoMirrorVO getMirrorForUser(String macAddress);
+
+    /** 家长整表保存（T2）：>30 条拒绝、单条 30 字截断；存镜像置 pending，返回含在线/pending 状态 */
+    TodoMirrorVO saveTodoListForUser(TodoReportDTO dto);
+
+    /** 下发循环拉取待下发清单（xiaozhi-server 每 60s 调用；仅 pending 且同步开关开的设备） */
+    List<TodoMirrorVO> getPendingMirrors();
+
+    /** 下发回执（T2）：set_todos(replace) receipt ok 后清 pending；镜像内容已被更新保存时保留 pending */
+    void markDelivered(TodoReportDTO dto);
 }
