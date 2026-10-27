@@ -375,17 +375,26 @@ class TodoServiceImplDailyTest {
     void rebuildSkipsSyncDisabledDeviceAndDeviceWithoutTemplates() {
         TodoMirrorDao mirrorDao = mock(TodoMirrorDao.class);
         TodoDailyTemplateDao dailyDao = mock(TodoDailyTemplateDao.class);
-        TodoMirrorEntity syncOff = storedMirror("BB", item("刷牙", true));
+        TodoMirrorEntity syncOff = storedMirror("BB", item("旧任务", true));
         syncOff.setSyncEnabled(0);
+        TodoMirrorEntity mirrorAA = storedMirror("AA", item("写作业", false)); // AA：同步开、走重建
         when(dailyDao.selectList(any())).thenReturn(List.of(
                 storedTpl("AA", "morning", "刷牙", null, 0),
-                storedTpl("BB", "morning", "刷牙", null, 0)));
-        when(mirrorDao.selectOne(any())).thenReturn(syncOff); // BB 同步开关关
+                storedTpl("BB", "morning", "刷牙", null, 0))); // 无模板设备不进 byMac 循环（结构保证）
+        // H12：按 mac 区分 stub（模板序即 selectOne 调用序）——sync-ON 的 AA 必须真正走重建；
+        // 单一 thenReturn(syncOff) 曾让 AA 也被跳过，测试空洞通过
+        when(mirrorDao.selectOne(any())).thenReturn(mirrorAA, syncOff); // AA 同步开、BB 同步关
 
         newService(mirrorDao, dailyDao, mock(DeviceService.class)).rebuildDailyLists();
 
-        verify(mirrorDao, never()).updateById(any(TodoMirrorEntity.class)); // BB 跳过、无模板设备不进循环
-        verify(mirrorDao, never()).insert(any(TodoMirrorEntity.class));
+        ArgumentCaptor<TodoMirrorEntity> captor = ArgumentCaptor.forClass(TodoMirrorEntity.class);
+        verify(mirrorDao, org.mockito.Mockito.times(1)).updateById(captor.capture()); // 只有 AA 重建
+        assertEquals("AA", captor.getValue().getMacAddress());
+        List<TodoItemDTO> merged = xiaozhi.common.utils.JsonUtils.parseObject(captor.getValue().getItems(),
+                new com.fasterxml.jackson.core.type.TypeReference<List<TodoItemDTO>>() {
+                });
+        assertEquals(List.of(item("刷牙", false), item("写作业", false)), merged); // 每日重置 + 手动留存
+        verify(mirrorDao, never()).insert(any(TodoMirrorEntity.class)); // AA/BB 均已有镜像行
     }
 
     @Test
