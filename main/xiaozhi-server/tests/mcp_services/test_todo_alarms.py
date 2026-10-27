@@ -71,10 +71,22 @@ class TestTranslateDue:
                                         quiet_start="21:00", quiet_end="21:30") == []
 
     def test_invalid_due_yields_no_points(self):
-        assert todo_sync.translate_due("9:00", "x") == []
         assert todo_sync.translate_due("25:00", "x") == []
         assert todo_sync.translate_due("", "x") == []
         assert todo_sync.translate_due(None, "x") == []
+
+    def test_late_night_due_next_morning_crosses_midnight(self):
+        # H5：23:50 设次日 01:00 截止（65 分钟后）——due 当日读数已过 → 视为次日，
+        # 00:00 / 00:30 两个提醒点是未来，不得当过期点过滤掉
+        specs = todo_sync.translate_due("01:00", "写作业", now_hm="23:50",
+                                        quiet_start="21:00", quiet_end="21:30")
+        assert [s["time"] for s in specs] == ["00:00", "00:30"]
+        assert [s["kind"] for s in specs] == ["1h", "30m"]
+
+    def test_due_equal_to_now_is_not_treated_as_next_day(self):
+        # H5 边界：due 恰为 now 不 +1440（两个提醒点均已过 → 空）
+        assert todo_sync.translate_due("10:00", "x", now_hm="10:00",
+                                       quiet_start="21:00", quiet_end="21:30") == []
 
 
 # ───────────────────────── MCP 闹钟链路（真实 call_mcp_tool 路径） ─────────────────────────

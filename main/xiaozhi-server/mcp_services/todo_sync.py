@@ -277,25 +277,30 @@ def translate_due(due, text: str, *, now_hm: str | None = None,
                   quiet_start: str = DEFAULT_QUIET_START, quiet_end: str = DEFAULT_QUIET_END) -> list[dict]:
     """due(HH:MM) → 提醒点 [{kind,time,message}]：due−1h 与 due−30m 两档，按时间序。
 
-    过滤顺序（spec #30「截止提醒语义」）：负值点（跨零点回退到昨日）与 deadline<=now 的
-    过期点直接丢弃——设备对已过 HH:MM 会静默顺延明天，不过滤即产生次日幽灵闹钟；
-    落静默时段 [quiet_start, quiet_end)（支持跨零点）的点不设。非法 due 返回空。
+    跨零点语义：due 当日读数 < now → 截止在次日（23:50 设次日 01:00），+1440 再比较，
+    否则次日凌晨的提醒点全被当过期点过滤，65 分钟后的截止永远没有提醒。
+    过滤顺序（spec #30「截止提醒语义」）：deadline<=now 的过期点直接丢弃——设备对已过
+    HH:MM 会静默顺延明天，不过滤即产生次日幽灵闹钟；落静默时段 [quiet_start, quiet_end)
+    （支持跨零点）的点不设。非法 due 返回空。
     """
     due_min = _hm_to_min(due)
     if due_min is None:
         return []
     now_min = _hm_to_min(now_hm) if now_hm is not None else _now_min()
+    if due_min < now_min:
+        due_min += 1440  # 截止已过当日读数 → 次日（now 之前 +1440 的点保证未来）
     qs, qe = _hm_to_min(quiet_start), _hm_to_min(quiet_end)
     specs = []
     for kind, delta in (("1h", 60), ("30m", 30)):
         point = due_min - delta
-        if point < 0 or point <= now_min:
+        if point <= now_min:  # 含负值（due<60 时 due-60<0<now）：过期点不设
             continue
         if qs is not None and qe is not None:
-            in_quiet = qs <= point < qe if qs <= qe else point >= qs or point < qe
+            tod = point % 1440  # 静默按时段判断（次日 00:30 与当日 00:30 同静默）
+            in_quiet = qs <= tod < qe if qs <= qe else tod >= qs or tod < qe
             if in_quiet:
                 continue
-        specs.append({"kind": kind, "time": _min_to_hm(point),
+        specs.append({"kind": kind, "time": _min_to_hm(point % 1440),
                       "message": REMINDER_TEXTS[kind].format(text=text)})
     return specs
 
