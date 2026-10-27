@@ -2,6 +2,8 @@ package xiaozhi.modules.todo.service;
 
 import java.util.List;
 
+import xiaozhi.modules.todo.dto.TodoDailyItemDTO;
+import xiaozhi.modules.todo.dto.TodoDailySaveDTO;
 import xiaozhi.modules.todo.dto.TodoReportDTO;
 import xiaozhi.modules.todo.vo.TodoMirrorVO;
 
@@ -24,4 +26,13 @@ public interface TodoService {
 
     /** 下发回执（T2）：set_todos(replace) receipt ok 后清 pending；镜像内容已被更新保存时保留 pending */
     void markDelivered(TodoReportDTO dto);
+
+    /** 家长查询每日任务模板（T3：校验设备属主，按保存顺序返回） */
+    List<TodoDailyItemDTO> getDailyForUser(String macAddress);
+
+    /** 家长整组保存每日任务模板（T3：全量替换；分组白名单、30 字截断、≤30 条） */
+    List<TodoDailyItemDTO> saveDailyForUser(TodoDailySaveDTO dto);
+
+    /** 每天 0 点重建当日清单（T3）：每日项重置未完成 ∪ 存量非每日项留存，写镜像置 pending */
+    void rebuildDailyLists();
 }

@@ -20,4 +20,18 @@ public class TodoReportDTO {
     @NotNull(message = "清单不能为空")
     @Valid
     private List<TodoItemDTO> items;
+
+    // ── 设备级配置（#33 评论补充：家长页设备级配置块随整表保存一并提交；上报路径不传，null=不修改） ──
+
+    @Schema(description = "同步开关（1=开 0=关；null=不修改）")
+    private Boolean syncEnabled;
+
+    @Schema(description = "提醒静默起始 HH:MM（null/空=不修改）")
+    private String quietStart;
+
+    @Schema(description = "提醒静默结束 HH:MM（null/空=不修改）")
+    private String quietEnd;
+
+    @Schema(description = "清单条数软上限 1-30（null=不修改）")
+    private Integer maxItems;
 }

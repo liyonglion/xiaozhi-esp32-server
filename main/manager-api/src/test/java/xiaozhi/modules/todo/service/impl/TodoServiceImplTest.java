@@ -31,6 +31,7 @@ import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.security.user.SecurityUser;
+import xiaozhi.modules.todo.dao.TodoDailyTemplateDao;
 import xiaozhi.modules.todo.dao.TodoEventDao;
 import xiaozhi.modules.todo.dao.TodoMirrorDao;
 import xiaozhi.modules.todo.dto.TodoItemDTO;
@@ -72,14 +73,15 @@ class TodoServiceImplTest {
         return JsonUtils.parseObject(json, ITEM_LIST);
     }
 
-    /** 统一构造：服务新增在线注册表依赖后，老用例不必逐个改构造 */
+    /** 统一构造：服务新增依赖后，老用例不必逐个改构造 */
     static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoEventDao eventDao, DeviceService deviceService) {
-        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, new TodoOnlineRegistry());
+        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, new TodoOnlineRegistry(),
+                mock(TodoDailyTemplateDao.class));
     }
 
     static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoEventDao eventDao, DeviceService deviceService,
             TodoOnlineRegistry registry) {
-        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, registry);
+        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, registry, mock(TodoDailyTemplateDao.class));
     }
 
     /** 归属当前测试用户的设备（配合 MockedStatic SecurityUser） */
