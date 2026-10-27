@@ -71,6 +71,8 @@ public class TodoServiceImpl implements TodoService {
         if (existing != null) {
             // 完成事件：与旧镜像 diff 出「由未完成变为完成」的转变（首报 existing==null 不产生事件）
             insertCompletionEvents(dto.getMacAddress(), parseItems(existing.getItems()), items, now);
+            // 设备 receipt 无 due 概念：按文本从旧镜像续期 due（文本没了=任务删/改写，due 随之消失）
+            items = carryForwardDue(parseItems(existing.getItems()), items);
         }
         // 设备级配置列与 pending 不在语音上报的写集内：pending 传 null，updateById 已加载值原样写回
         writeMirror(dto.getMacAddress(), items, SOURCE_VOICE, null, null, existing, null);
@@ -90,7 +92,8 @@ public class TodoServiceImpl implements TodoService {
         return getMirror(dto.getMacAddress());
     }
 
-    /** 设备级配置信任边界校验（#33 评论补充）：静默时刻必须 HH:MM、上限 1-30；字段缺省/空白=不修改 */
+    /** 设备级配置信任边界校验（#33 评论补充）：静默时刻必须 HH:MM、上限 1-30；字段缺省/空白=不修改。
+     *  #34：items 的 due（截止时刻）同口径校验——家长整表保存是 due 的唯一语音外入口。 */
     private static void validateDeviceConfig(TodoReportDTO dto) {
         String quietStart = StringUtils.trimToNull(dto.getQuietStart());
         if (quietStart != null && !HH_MM.matcher(quietStart).matches()) {
@@ -102,6 +105,14 @@ public class TodoServiceImpl implements TodoService {
         }
         if (dto.getMaxItems() != null && (dto.getMaxItems() < 1 || dto.getMaxItems() > MAX_ITEMS)) {
             throw new RenException("清单条数上限应在 1-" + MAX_ITEMS + " 之间");
+        }
+        if (dto.getItems() != null) {
+            for (TodoItemDTO item : dto.getItems()) {
+                String due = StringUtils.trimToNull(item.getDue());
+                if (due != null && !HH_MM.matcher(due).matches()) {
+                    throw new RenException("截止时刻格式应为 HH:MM，如 20:30");
+                }
+            }
         }
     }
 
@@ -134,7 +145,9 @@ public class TodoServiceImpl implements TodoService {
                 .map(r -> {
                     TodoMirrorVO vo = new TodoMirrorVO();
                     vo.setMac(r.getMacAddress());
-                    vo.setItems(parseItems(r.getItems()));
+                    vo.setItems(parseItems(r.getItems())); // items 带 due：下发侧剥离，提醒翻译消费
+                    vo.setQuietStart(r.getQuietStart());
+                    vo.setQuietEnd(r.getQuietEnd());
                     return vo;
                 })
                 .collect(Collectors.toList());
@@ -143,11 +156,30 @@ public class TodoServiceImpl implements TodoService {
     @Override
     public void markDelivered(TodoReportDTO dto) {
         // 条件更新原子表达「内容未变才清 pending」：家长在送达期间又保存了新清单时，
-        // items 已变 → 0 行命中 → 新 pending 保留，下一轮循环照常下发
+        // items 已变 → 0 行命中 → 新 pending 保留，下一轮循环照常下发。
+        // #34：镜像 items 带服务端 due 而设备 receipt 没有——比较用 {text,done} 投影，条件仍锁存储行原文
+        TodoMirrorEntity stored = selectByMac(dto.getMacAddress());
+        if (stored == null || !sameTextDone(parseItems(stored.getItems()), sanitize(dto.getItems()))) {
+            return;
+        }
         mirrorDao.update(null, new LambdaUpdateWrapper<TodoMirrorEntity>()
                 .eq(TodoMirrorEntity::getMacAddress, dto.getMacAddress())
-                .eq(TodoMirrorEntity::getItems, JsonUtils.toJsonString(sanitize(dto.getItems())))
+                .eq(TodoMirrorEntity::getItems, stored.getItems())
                 .set(TodoMirrorEntity::getPending, 0));
+    }
+
+    /** {text,done} 投影相等（due 为服务端侧字段，不参与「内容未变」判定） */
+    private static boolean sameTextDone(List<TodoItemDTO> a, List<TodoItemDTO> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            if (!StringUtils.equals(a.get(i).getText(), b.get(i).getText())
+                    || Boolean.TRUE.equals(a.get(i).getDone()) != Boolean.TRUE.equals(b.get(i).getDone())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 镜像写单点：insert（撞 mac 唯一键回退更新）/ update；pending 传 null 表示不改写已加载值；
@@ -299,7 +331,9 @@ public class TodoServiceImpl implements TodoService {
         Set<String> dailyTexts = new HashSet<>();
         for (TodoDailyTemplateEntity t : templates) {
             if (dailyTexts.add(t.getText())) {
-                daily.add(itemOf(t.getText(), false));
+                TodoItemDTO i = itemOf(t.getText(), false);
+                i.setDue(t.getDeadline()); // #34：模板 deadline → 当日项 due（0 点重设当天提醒闹钟的种子）
+                daily.add(i);
             }
         }
         List<TodoItemDTO> manual = parseItems(mirror == null ? null : mirror.getItems()).stream()
@@ -335,6 +369,30 @@ public class TodoServiceImpl implements TodoService {
         dto.setText(row.getText());
         dto.setDeadline(row.getDeadline());
         return dto;
+    }
+
+    /** 语音上报续期 due：新项文本命中旧镜像文本 → 带回旧 due；未命中（新增任务）无 due；旧文本消失随任务删除。
+     *  产出新对象不改入参（设备 receipt 项无 due 字段，这里补的是服务端侧信息）。 */
+    private static List<TodoItemDTO> carryForwardDue(List<TodoItemDTO> oldItems, List<TodoItemDTO> newItems) {
+        Map<String, String> oldDues = new LinkedHashMap<>();
+        for (TodoItemDTO old : oldItems) {
+            if (old.getDue() != null) {
+                oldDues.putIfAbsent(old.getText(), old.getDue());
+            }
+        }
+        if (oldDues.isEmpty()) {
+            return newItems;
+        }
+        return newItems.stream().map(i -> {
+            if (i.getDue() != null || !oldDues.containsKey(i.getText())) {
+                return i;
+            }
+            TodoItemDTO c = new TodoItemDTO();
+            c.setText(i.getText());
+            c.setDone(i.getDone());
+            c.setDue(oldDues.get(i.getText()));
+            return c;
+        }).collect(Collectors.toList());
     }
 
     /** 完成事件 diff：新清单中 done 且旧清单中同文本未完成的项，逐条入库 */
@@ -384,7 +442,7 @@ public class TodoServiceImpl implements TodoService {
         }
     }
 
-    /** 信任边界规整：单条文本 30 字截断；产出新对象不改入参（条数上限由调用方决定拒绝或截断） */
+    /** 信任边界规整：单条文本 30 字截断；due 剔空白（非法格式在家长保存入口已拒，此处兜底剔除）；产出新对象不改入参 */
     private static List<TodoItemDTO> sanitize(List<TodoItemDTO> items) {
         if (items == null) {
             return Collections.emptyList();
@@ -393,6 +451,8 @@ public class TodoServiceImpl implements TodoService {
             TodoItemDTO t = new TodoItemDTO();
             t.setText(StringUtils.substring(StringUtils.defaultString(i.getText()), 0, MAX_TEXT_LEN));
             t.setDone(Boolean.TRUE.equals(i.getDone()));
+            String due = StringUtils.trimToNull(i.getDue());
+            t.setDue(due != null && HH_MM.matcher(due).matches() ? due : null);
             return t;
         }).collect(Collectors.toList());
     }

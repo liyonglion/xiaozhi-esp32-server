@@ -61,6 +61,12 @@ class TodoServiceImplDailyTest {
         return i;
     }
 
+    static TodoItemDTO item(String text, boolean done, String due) {
+        TodoItemDTO i = item(text, done);
+        i.setDue(due);
+        return i;
+    }
+
     static TodoDailyItemDTO tpl(String group, String text, String deadline) {
         TodoDailyItemDTO t = new TodoDailyItemDTO();
         t.setGroup(group);
@@ -287,9 +293,9 @@ class TodoServiceImplDailyTest {
         List<TodoItemDTO> merged = xiaozhi.common.utils.JsonUtils.parseObject(updated.getItems(),
                 new com.fasterxml.jackson.core.type.TypeReference<List<TodoItemDTO>>() {
                 });
-        // 每日项在前（模板顺序、全部重置未完成），手动项在后（镜像顺序、完成状态留存）
+        // 每日项在前（模板顺序、全部重置未完成；#34 模板 deadline 随重建成为当日项 due），手动项在后（镜像顺序、完成状态留存）
         assertEquals(List.of(
-                item("刷牙", false), item("收拾玩具", false), item("写作业", false), item("读绘本", true)), merged);
+                item("刷牙", false, "07:30"), item("收拾玩具", false), item("写作业", false), item("读绘本", true)), merged);
         assertEquals("daily", updated.getSource()); // 重建来源
         assertEquals(Integer.valueOf(1), updated.getPending()); // 经既有 60s 通道送达
     }

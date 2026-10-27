@@ -377,6 +377,7 @@ class TodoServiceImplTest {
     @Test
     void markDeliveredClearsPendingOnlyWhenItemsUnchanged() {
         TodoMirrorDao mirrorDao = mock(TodoMirrorDao.class);
+        when(mirrorDao.selectOne(any())).thenReturn(storedMirror("AA", item("读绘本", false)));
         when(mirrorDao.update(any(), any())).thenReturn(1); // 条件命中（镜像内容==送达内容）→ pending 清
 
         newService(mirrorDao, mock(TodoEventDao.class), mock(DeviceService.class))
@@ -384,11 +385,11 @@ class TodoServiceImplTest {
 
         org.mockito.Mockito.verify(mirrorDao, org.mockito.Mockito.times(1)).update(any(), any());
 
-        // 家长在送达期间又保存新清单：镜像 items 已变 → 条件不命中（0 行）→ pending 保留待下一轮下发
-        when(mirrorDao.update(any(), any())).thenReturn(0);
+        // 家长在送达期间又保存新清单：镜像 items 已变 → {text,done} 投影不一致 → 不清 pending 待下一轮下发
+        when(mirrorDao.selectOne(any())).thenReturn(storedMirror("AA", item("新清单", false)));
         newService(mirrorDao, mock(TodoEventDao.class), mock(DeviceService.class))
                 .markDelivered(report("AA", item("读绘本", false)));
-        org.mockito.Mockito.verify(mirrorDao, org.mockito.Mockito.times(2)).update(any(), any());
+        org.mockito.Mockito.verify(mirrorDao, org.mockito.Mockito.times(1)).update(any(), any()); // 仍只一次
     }
 
     // ───────────────────────── T2：在线状态（xiaozhi-server 周期上报） ─────────────────────────
