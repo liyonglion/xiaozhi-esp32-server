@@ -317,6 +317,39 @@ async def report_todo_list(instance, mac_address: str, todos: list) -> Optional[
     )
 
 
+@api_guard("拉取 todo 待下发清单失败")
+async def get_todo_pending(instance) -> Optional[list]:
+    """拉取待下发清单（#32：60s 同步循环扫描；返回 [{mac, items}] 或 None）。
+
+    单次请求不走重试：失败与空表同语义（本轮跳过），下一轮循环天然重试。
+    """
+    return await instance._async_request("GET", "/config/todo-list/pending")
+
+
+@api_guard("todo 送达回执失败")
+async def report_todo_delivered(instance, mac_address: str, todos: list) -> Optional[Dict]:
+    """下发回执（#32）：set_todos(replace) receipt ok 后清 pending。
+
+    单次请求不走重试：回执丢失则 pending 未清，下一轮整表重发（replace 幂等）。
+    """
+    return await instance._async_request(
+        "POST", "/config/todo-list/delivered",
+        json={"macAddress": mac_address, "items": todos},
+    )
+
+
+@api_guard("todo 在线集合上报失败")
+async def report_online_macs(instance, macs: list) -> Optional[Dict]:
+    """周期上报在线 mac 全量集合（#32：家长页在线/离线徽标数据源）。
+
+    单次请求不走重试：下一轮循环（60s）即重新上报全量集合，自带收敛。
+    """
+    return await instance._async_request(
+        "POST", "/config/todo-list/online",
+        json={"macs": macs},
+    )
+
+
 @api_guard("生成并保存聊天记录总结失败")
 async def generate_and_save_chat_summary(instance, session_id: str) -> Optional[Dict]:
     """生成并保存聊天记录总结（守护线程中调用，服务已关闭时静默返回 None）"""
