@@ -38,9 +38,9 @@ _report_tasks: set[asyncio.Task] = set()  # 持引用防 GC；fire-and-forget �
 _locks: dict[str, asyncio.Lock] = {}  # per-device FIFO：上报按语音操作顺序落库
 _connections: dict[str, "ConnectionHandler"] = {}  # 在线连接注册表（mac→conn）
 
-# 下发期间挂在 conn 上的标记：抑制 T1 语音上报挂钩——下发的 receipt 由本模块
-# 自行回执清 pending，再走语音上报会把旧内容回写镜像、来源错记 voice
-_PUSHING_ATTR = "_todo_downlink_push"
+# 下发抑制按调用粒度：mcp_handler 的 receipt 挂钩在发起调用的那个 asyncio task 里同步触发，
+# 记录下发自身的 task 即可精确区分——下发在途（最长 30s）期间孩子的语音 receipt 不受牵连
+_pushing_tasks: set[asyncio.Task] = set()
 
 
 def parse_receipt(raw: str) -> list | None:
@@ -67,8 +67,8 @@ def parse_receipt(raw: str) -> list | None:
 
 def on_set_todos_receipt(conn: "ConnectionHandler", raw_result: str) -> None:
     """set_todos 返回路径挂钩入口（mcp_handler 调用）：receipt 无效静默返回。"""
-    if getattr(conn, _PUSHING_ATTR, False):
-        return  # 下发路径的回执由 _push_and_confirm 处理，不再触发语音上报
+    if asyncio.current_task() in _pushing_tasks:
+        return  # 下发自身调用的回执由 _push_and_confirm 处理，不再触发语音上报
     todos = parse_receipt(raw_result)
     if todos is None:
         return
@@ -182,14 +182,15 @@ async def _push_and_confirm(conn: "ConnectionHandler", items: list) -> None:
     if not await mcp.is_ready():
         return
 
-    setattr(conn, _PUSHING_ATTR, True)
+    task = asyncio.current_task()
+    _pushing_tasks.add(task)  # 只抑制本调用：语音 receipt 在别的 task 里触发，不受影响
     try:
         raw = await call_mcp_tool(
             conn, mcp, "set_todos",
             {"action": "replace", "text": json.dumps(strip_due(items), ensure_ascii=False)},
         )
     finally:
-        setattr(conn, _PUSHING_ATTR, False)
+        _pushing_tasks.discard(task)
 
     todos = parse_receipt(raw)
     if todos is None:

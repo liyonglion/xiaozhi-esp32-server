@@ -3,6 +3,8 @@
 mock 边界收在 manage_api_client 与连接对象处（FakeMCPClient/FakeWS/wire_conn 收敛在 conftest），
 走真实 call_mcp_tool 路径验证 MCP 出参与 receipt 挂钩抑制。
 """
+import asyncio
+import contextlib
 import json
 
 import pytest
@@ -29,6 +31,7 @@ def _clean_registry():
     todo_sync._alarms.clear()
     todo_sync._quiet_cfg.clear()
     todo_sync._ensured_conns.clear()
+    todo_sync._pushing_tasks.clear()
 
 
 class TestConnectionRegistry:
@@ -265,3 +268,37 @@ class TestSyncManagerLoop:
         await manager.stop()
 
         assert len(cycles) >= 2  # 首轮炸掉后循环继续跑（修复前 catch-all 落出 while 只跑一轮）
+
+
+class TestPushSuppression:
+    """H2：下发抑制只作用于下发自身那次 set_todos 调用——在途期间孩子的语音 receipt 照常上报。"""
+
+    async def test_voice_receipt_during_inflight_push_is_not_suppressed(self, monkeypatch):
+        def responder(tool, args):
+            if tool == "set_todos":
+                return None  # 设备不回：下发调用挂在等待回执上（在途窗口，最长 30s）
+            return '{"ok": true, "todos": []}'
+
+        conn = wire_conn(MAC_A, responder)
+        todo_sync.register_connection(MAC_A, conn)
+        voice_reports = []
+
+        async def fake_voice_report(mac, items):
+            voice_reports.append((mac, items))
+
+        monkeypatch.setattr("config.manage_api_client.report_todo_list", fake_voice_report)
+
+        push = asyncio.ensure_future(
+            todo_sync._push_and_confirm(conn, [{"text": "读绘本", "done": False}]))
+        await tick(0.05)  # 下发调用已发出、正挂在 await 回执
+        # 孩子语音「做完了」：receipt 挂钩在语音调用的 task 里触发（非下发 task），不得被抑制
+        todo_sync.on_set_todos_receipt(conn, json.dumps(
+            {"ok": True, "todos": [{"text": "读绘本", "done": True}]}, ensure_ascii=False))
+        if todo_sync._report_tasks:
+            await asyncio.wait_for(asyncio.gather(*list(todo_sync._report_tasks)), timeout=2)
+
+        assert voice_reports == [(MAC_A, [{"text": "读绘本", "done": True}])]  # 完成事件不被吞
+
+        push.cancel()  # 挂起的下发不再需要
+        with contextlib.suppress(asyncio.CancelledError):
+            await push
