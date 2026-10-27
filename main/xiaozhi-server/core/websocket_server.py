@@ -128,8 +128,9 @@ class WebSocketServer:
             self._intent,
             self,  # 传入server实例
         )
-        # #32：连接注册表挂载点——todo 下发循环按 mac 找在线连接（身份守卫注销在 finally）
-        device_id = headers.get("device-id")
+        # #32：连接注册表挂载点——todo 下发循环按 mac 找在线连接（身份守卫注销在 finally）。
+        # 读 websocket.request.headers 而非上方 local copy：query 参数回填发生在 copy 之后
+        device_id = websocket.request.headers.get("device-id")
         if device_id:
             register_connection(device_id, handler)
         try:
