@@ -122,20 +122,18 @@ class TodoSyncManager:
         self._task = None
 
     async def _loop(self) -> None:
-        try:
-            while not self._stop_event.is_set():
+        while not self._stop_event.is_set():
+            try:
                 await run_sync_cycle()
-                try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval_seconds)
-                    break
-                except asyncio.TimeoutError:
-                    pass
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # 循环兜底：单轮异常已各自吞掉，这里只防意外退出
-            from config.logger import setup_logging
-
-            setup_logging().bind(tag=TAG).error(f"todo 同步循环退出: {e}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # 单轮未预见异常只记日志，循环继续（防一次性 bug 永久停摆）
+                _log("error", f"todo 同步单轮异常: {e}")
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=self.interval_seconds)
+                break
+            except asyncio.TimeoutError:
+                pass
 
 
 # app.py 挂载的全局单例

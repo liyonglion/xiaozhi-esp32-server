@@ -245,3 +245,23 @@ class TestSyncCycle:
 
         assert delivered == []
         assert conn.websocket.sent == []
+
+
+class TestSyncManagerLoop:
+    """TodoSyncManager._loop：单轮未预见异常不得落出 while（否则下发/对账停摆到进程重启）。"""
+
+    async def test_loop_survives_unexpected_cycle_error(self, monkeypatch):
+        cycles = []
+
+        async def flaky_cycle():
+            cycles.append(1)
+            if len(cycles) == 1:
+                raise RuntimeError("unexpected bug")
+
+        monkeypatch.setattr(todo_sync, "run_sync_cycle", flaky_cycle)
+        manager = todo_sync.TodoSyncManager(interval_seconds=0.02)
+        await manager.start()
+        await tick(0.15)
+        await manager.stop()
+
+        assert len(cycles) >= 2  # 首轮炸掉后循环继续跑（修复前 catch-all 落出 while 只跑一轮）
