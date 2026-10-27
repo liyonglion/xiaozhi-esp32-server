@@ -166,7 +166,8 @@ def fixed_now(monkeypatch):
 
 
 def seed_record(text="写作业", kind="30m", time="20:00", message=MSG_30M, alarm_id=5):
-    return {"text": text, "kind": kind, "time": time, "message": message, "id": alarm_id}
+    return {"text": text, "kind": kind, "time": time, "message": message,
+            "id": alarm_id, "confirmed": True}
 
 
 def pending_row(items, quiet=("21:00", "07:00")):
@@ -273,6 +274,54 @@ class TestDownlinkStripAndReset:
 
         assert clock_calls(toolbox, "set_todos")
         assert todo_sync._alarms[MAC] == []
+
+    async def test_voice_completion_during_reset_window_does_not_resurrect(self, monkeypatch, fixed_now):
+        """H9：重设 await 窗口内语音完成任务——簿记不摘除（完成事件看得到、能 cancel），
+        写回与窗口期完成事件按任务文本合并，已设的新闹钟补取消、不复活。"""
+
+        class ToolboxWithMidairVoice(Toolbox):
+            """首个 set_alarm 回执时在独立 task 里注入语音 receipt（模拟窗口内孩子说「做完了」）。"""
+
+            def __init__(self, todos_receipt):
+                super().__init__(todos_receipt=todos_receipt)
+                self.voice_conn = None
+                self._fired = False
+
+            def receipt_for(self, name, args):
+                if name == "self_clock_set_alarm" and not self._fired:
+                    self._fired = True
+                    todo_sync._spawn(self._voice_done(self.voice_conn))
+                return super().receipt_for(name, args)
+
+            @staticmethod
+            async def _voice_done(conn):
+                todo_sync.on_set_todos_receipt(conn, json.dumps(
+                    {"ok": True, "todos": [{"text": "写作业", "done": True}]}, ensure_ascii=False))
+
+        echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
+        toolbox = ToolboxWithMidairVoice(echo)
+        conn = wire_toolbox(toolbox)
+        toolbox.voice_conn = conn
+        todo_sync.register_connection(MAC, conn)
+        todo_sync._alarms[MAC] = [seed_record(kind="1h", time="19:30", message=MSG_1H, alarm_id=5)]
+        stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
+
+        async def fake_report(mac, items):
+            return None
+
+        monkeypatch.setattr("config.manage_api_client.report_todo_list", fake_report)
+
+        await todo_sync.run_sync_cycle()
+        new_alarm_ids = [a["id"] for a in toolbox.device_alarms
+                         if a["message"] in (MSG_1H, MSG_30M)]  # 窗口内新设（cancel 前快照）
+        if todo_sync._report_tasks:
+            await asyncio.wait_for(asyncio.gather(*list(todo_sync._report_tasks)), timeout=2)
+        await asyncio.wait_for(asyncio.gather(*list(todo_sync._bg_tasks)), timeout=2)
+
+        cancelled = [c["id"] for c in clock_calls(toolbox, "self_clock_cancel")]
+        assert 5 in cancelled  # 旧映射照常取消
+        assert set(new_alarm_ids) <= set(cancelled)  # 窗口期已设的新闹钟补取消（不真响）
+        assert todo_sync._alarms[MAC] == []  # 已完成任务的提醒不复活（收养路径也不复活）
 
 
 class TestVoiceCancel:
@@ -432,3 +481,86 @@ class TestRetrySemantics:
         await todo_sync.run_sync_cycle()
 
         assert todo_sync._alarms[MAC] == []  # 非时间未同步错误：放弃，不无限重试
+
+
+class TestConfirmSemantics:
+    """H8：set_alarm 回执无 id 键 → ok 即视为已设（confirmed），不每 60s 重设堆真闹钟；
+    cancel 需要时经 self.clock.list 以 message 反查 id。"""
+
+    async def test_receipt_without_id_counts_as_confirmed_no_retry_loop(self, monkeypatch, fixed_now):
+        echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
+        toolbox = Toolbox(todos_receipt=echo)
+        toolbox.set_alarm_receipt = '{"ok": true}'  # 固件回执不带 id
+        conn = wire_toolbox(toolbox)
+        todo_sync.register_connection(MAC, conn)
+        stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
+
+        await todo_sync.run_sync_cycle()
+
+        async def pending_empty():
+            return []
+
+        monkeypatch.setattr("config.manage_api_client.get_todo_pending", pending_empty)
+        await todo_sync.run_sync_cycle()  # 下一轮对账面：已确认 → 不重设
+
+        assert len(clock_calls(toolbox, "self_clock_set_alarm")) == 2  # 只有首轮的两个提醒点
+        assert all(r.get("confirmed") for r in todo_sync._alarms[MAC])
+
+    async def test_cancel_resolves_id_by_message_when_receipt_had_none(self, monkeypatch, fixed_now):
+        echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
+        toolbox = Toolbox(todos_receipt=echo)
+        toolbox.set_alarm_receipt = '{"ok": true}'  # 簿记无 id
+        conn = wire_toolbox(toolbox)
+        todo_sync.register_connection(MAC, conn)
+        stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
+
+        await todo_sync.run_sync_cycle()
+        device_alarm_ids = sorted(a["id"] for a in toolbox.device_alarms)
+
+        async def fake_report(mac, items):
+            return None
+
+        monkeypatch.setattr("config.manage_api_client.report_todo_list", fake_report)
+        todo_sync.on_set_todos_receipt(conn, json.dumps(  # 语音完成 → 簿记联动 cancel
+            {"ok": True, "todos": [{"text": "写作业", "done": True}]}, ensure_ascii=False))
+        await asyncio.wait_for(asyncio.gather(*list(todo_sync._bg_tasks)), timeout=2)
+
+        assert sorted(c["id"] for c in clock_calls(toolbox, "self_clock_cancel")) == device_alarm_ids
+
+
+class TestCancelLogging:
+    """H11：cancel 失败不静默——「闹钟已不存在」属预期（debug），其它异常 warning 留上下文。"""
+
+    async def test_cancel_alarm_separates_expected_missing_from_program_error(self, monkeypatch):
+        from types import SimpleNamespace
+
+        conn = SimpleNamespace(device_id=MAC)
+        logged = []
+        monkeypatch.setattr(todo_sync, "_log", lambda level, msg: logged.append((level, msg)))
+
+        async def cancel_raises(conn, tool, args):
+            raise RuntimeError("MCP错误: alarm 5 does not exist")
+
+        monkeypatch.setattr(todo_sync, "_clock_call", cancel_raises)
+        await todo_sync._cancel_alarm(conn, 5)
+        assert logged and logged[0][0] == "debug"  # 预期失败：debug 级
+
+        logged.clear()
+
+        async def cancel_boom(conn, tool, args):
+            raise ValueError("boom")
+
+        monkeypatch.setattr(todo_sync, "_clock_call", cancel_boom)
+        await todo_sync._cancel_alarm(conn, 5)
+        assert logged and logged[0][0] == "warning" and "boom" in logged[0][1]  # 程序错误：warning
+
+    def test_log_falls_back_to_stderr_when_logger_unavailable(self, monkeypatch, capsys):
+        import config.logger as logger_mod
+
+        def broken(config=None):
+            raise RuntimeError("logger unavailable")
+
+        monkeypatch.setattr(logger_mod, "setup_logging", broken)
+        todo_sync._log("warning", "something failed")
+        err = capsys.readouterr().err
+        assert "todo_sync" in err and "warning" in err and "something failed" in err

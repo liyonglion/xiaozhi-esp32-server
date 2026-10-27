@@ -14,16 +14,20 @@ T4 截止提醒：server 只做翻译与簿记，不做提醒扫描、不推 TTS
 - 翻译：items 的服务端侧 due（HH:MM）→ due−1h / due−30m 两个提醒点，经设备已有
   self.clock.set_alarm 设置（静默时段内的点不设；deadline<=now 的过期点过滤后才调
   set_alarm，防设备把已过时刻顺延成次日幽灵闹钟）；
-- 簿记：模块级 mac→[{text,kind,time,message,id}]；下发成功后先 cancel 旧映射再按最新
-  items 重设；语音 receipt 里任务完成/文本消失（删除/改写）→ 按簿记 cancel；
+- 簿记：模块级 mac→[{text,kind,time,message,id,confirmed}]；下发成功后先 cancel 旧映射再按最新
+  items 重设（重设 await 窗口内簿记不摘除，写回与窗口期语音完成事件按任务文本合并）；
+  语音 receipt 里任务完成/文本消失（删除/改写）→ 按簿记 cancel（簿记无 id 时经 list 以
+  message 反查）；
 - 对账：60s 循环对新上线连接用 self.clock.list 以 message 为匹配键比对——簿记有而设备
   没有（设备重启丢闹钟）→ 过期过滤后重设；设备有而簿记没有（server 重启）→ 收养重建簿记；
-- 重试：set_alarm 返回「时间未同步」error 视为可重试（簿记 id 置 None 不确认，下轮循环再设）。
+- 重试：set_alarm 返回「时间未同步」error 视为可重试（簿记不确认，下轮循环再设）；
+  成功回执即确认（部分固件回执无 id 键，id 只是 cancel 的查找键）。
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -205,13 +209,14 @@ async def _push_and_confirm(conn: "ConnectionHandler", items: list) -> None:
 
 
 def _log(level: str, msg: str) -> None:
-    """旁路日志：连接对象不可用时（循环上下文无 conn）落到全局 logger。"""
+    """旁路日志：连接对象不可用时（循环上下文无 conn）落到全局 logger；
+    logger 本身不可用时落 stderr——绝不静默吞错（H11）。"""
     try:
         from config.logger import setup_logging
 
         getattr(setup_logging().bind(tag=TAG), level)(msg)
     except Exception:
-        pass
+        print(f"[{TAG}] {level}: {msg}", file=sys.stderr)
 
 
 async def _report_locked(conn: "ConnectionHandler", todos: list) -> None:
@@ -328,38 +333,80 @@ async def _clock_call(conn: "ConnectionHandler", tool: str, args: dict):
 
 
 async def _set_reminder_alarm(conn: "ConnectionHandler", rec: dict) -> bool:
-    """设单个提醒闹钟并落簿记 id。True=已确认或待重试（时间未同步，id 置 None，下轮循环再设）；
-    False=应放弃该记录（其它错误/工具不可用）。"""
+    """设单个提醒闹钟并落簿记。True=已确认或待重试（时间未同步，下轮循环再设）；
+    False=应放弃该记录（其它错误/工具不可用）。
+
+    H8：成功回执即视为已设（confirmed）——部分固件回执无 id 键，按未确认处理会
+    每 60s 重设一个真闹钟；id 只是 cancel 的查找键（缺失时经 list 以 message 反查）。
+    """
+    rec["id"] = None
+    rec["confirmed"] = False
     try:
         raw = await _clock_call(conn, CLOCK_SET_ALARM, {"time": rec["time"], "message": rec["message"]})
     except Exception as e:
         if "not synced" in str(e).lower():
-            rec["id"] = None  # 设备时间未同步：可重试，簿记未确认
-            return True
+            return True  # 设备时间未同步：可重试，簿记未确认
         _log("warning", f"todo 提醒闹钟设置失败 {conn.device_id}: {e}")
         return False
     if raw is None:
         return False
     try:
-        rec["id"] = json.loads(raw).get("id")
+        data = json.loads(raw)
+        rec["id"] = data.get("id")
     except (json.JSONDecodeError, AttributeError):
         return False
+    rec["confirmed"] = True
     return True
+
+
+async def _find_alarm_id(conn: "ConnectionHandler", message: str):
+    """经 self.clock.list 以 message 反查闹钟 id（簿记无 id 时的 cancel 查找键）。"""
+    try:
+        raw = await _clock_call(conn, CLOCK_LIST, {})
+    except Exception as e:
+        _log("warning", f"todo 闹钟反查失败 {conn.device_id}: {e}")
+        return None
+    try:
+        listed = json.loads(raw).get("alarms") or []
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    for a in listed:
+        if isinstance(a, dict) and a.get("message") == message:
+            return a.get("id")
+    return None
 
 
 async def _cancel_alarm(conn: "ConnectionHandler", alarm_id) -> None:
     try:
         await _clock_call(conn, CLOCK_CANCEL, {"id": alarm_id})
-    except Exception:
-        pass  # id 已不在设备上（响过/已取消/重启丢失）=目标已达成
+    except Exception as e:
+        msg = str(e).lower()
+        if "not exist" in msg or "not found" in msg:
+            _log("debug", f"todo 闹钟 {alarm_id} 已不在设备上，视为已取消")
+        else:
+            _log("warning", f"todo 闹钟取消失败 {conn.device_id} id={alarm_id}: {e}")
+
+
+async def _cancel_record(conn: "ConnectionHandler", rec: dict) -> None:
+    """按簿记记录取消设备闹钟：无 id（固件回执不带）时经 self.clock.list 以 message 反查。"""
+    alarm_id = rec.get("id")
+    if alarm_id is None:
+        alarm_id = await _find_alarm_id(conn, rec["message"])
+    if alarm_id is not None:
+        await _cancel_alarm(conn, alarm_id)
 
 
 async def _reset_alarms(conn: "ConnectionHandler", items: list, echo: list) -> None:
-    """admin 保存 / 每日重建下发成功后：先 cancel 该设备全部旧映射，再按最新 items（含 due）设当日闹钟。"""
+    """admin 保存 / 每日重建下发成功后：先 cancel 该设备全部旧映射，再按最新 items（含 due）设当日闹钟。
+
+    H9：多个 clock await 的窗口内簿记不摘除（语音完成事件仍能看到旧映射并 cancel）；
+    写回时与窗口期完成事件按任务文本合并——窗口内被 drop 的任务不复活，其新设闹钟补 cancel。
+    """
     mac = conn.device_id
-    for rec in _alarms.pop(mac, []):
-        if rec.get("id") is not None:
-            await _cancel_alarm(conn, rec["id"])
+    before = list(_alarms.get(mac) or [])
+    for rec in before:
+        if rec.get("confirmed"):
+            await _cancel_record(conn, rec)
     echo_done = {t["text"]: t["done"] for t in echo}
     quiet = _quiet_cfg.get(mac, (DEFAULT_QUIET_START, DEFAULT_QUIET_END))
     records = []
@@ -369,10 +416,17 @@ async def _reset_alarms(conn: "ConnectionHandler", items: list, echo: list) -> N
         text, due = it.get("text"), it.get("due")
         if not due or echo_done.get(text) is not False:
             continue  # 无截止 / 设备上已完成 / 文本不在回执（送达期间被改写）→ 不设
-        records.extend({**spec, "text": text, "id": None}
+        records.extend({**spec, "text": text, "id": None, "confirmed": False}
                        for spec in translate_due(due, text, quiet_start=quiet[0], quiet_end=quiet[1]))
     kept = [r for r in records if await _set_reminder_alarm(conn, r)]
-    _alarms[mac] = kept
+    dropped_texts = {r["text"] for r in before} - {r["text"] for r in (_alarms.get(mac) or [])}
+    revived = [r for r in kept if r["text"] in dropped_texts]
+    if revived:
+        _spawn(_cancel_booked(conn, revived))  # 窗口内已完成的任务：刚设的闹钟补取消
+    _alarms[mac] = [r for r in kept if r["text"] not in dropped_texts]
+    # 簿记刚按本次下发重建（含窗口期合并）：同轮循环不必再对账收养——
+    # 设备侧 list 滞后于在途 cancel，收养会把刚判死的信息复活回簿记
+    _ensured_conns[mac] = conn
 
 
 def _drop_finished_alarms(mac: str, todos: list) -> None:
@@ -392,8 +446,7 @@ def _drop_finished_alarms(mac: str, todos: list) -> None:
 
 async def _cancel_booked(conn: "ConnectionHandler", records: list) -> None:
     for r in records:
-        if r.get("id") is not None:
-            await _cancel_alarm(conn, r["id"])
+        await _cancel_record(conn, r)
 
 
 async def _reconcile_alarms(mac: str, conn: "ConnectionHandler") -> None:
@@ -421,11 +474,14 @@ async def _reconcile_alarms(mac: str, conn: "ConnectionHandler") -> None:
         ring = str(alarm.get("ring_at") or "")
         records.append({"text": parsed[0], "kind": parsed[1],
                         "time": ring.split(" ")[-1] if ":" in ring else None,
-                        "message": msg, "id": alarm.get("id")})
+                        "message": msg, "id": alarm.get("id"), "confirmed": True})
     now_min = _now_min()
     for rec in list(records):
-        if rec["message"] in on_device and rec.get("id") is not None:
-            continue  # 设备上在位：无需动作
+        alarm = on_device.get(rec["message"])
+        if alarm is not None:
+            rec["id"] = alarm.get("id", rec.get("id"))  # 在位即确认：刷新设备侧 id
+            rec["confirmed"] = True
+            continue
         point = _hm_to_min(rec.get("time"))
         if point is None or point <= now_min:
             records.remove(rec)  # 提醒点已过：不重设（重设会被设备顺延成次日幽灵闹钟）
@@ -439,7 +495,7 @@ async def _alarm_ensure_pass() -> None:
     """60s 循环的提醒面：新上线连接（重连/重启）对账；簿记存在未确认记录（时间未同步）重试。"""
     for mac, conn in list(_connections.items()):
         records = _alarms.get(mac) or []
-        if _ensured_conns.get(mac) is conn and all(r.get("id") is not None for r in records):
+        if _ensured_conns.get(mac) is conn and all(r.get("confirmed") for r in records):
             continue
         try:
             await _reconcile_alarms(mac, conn)
