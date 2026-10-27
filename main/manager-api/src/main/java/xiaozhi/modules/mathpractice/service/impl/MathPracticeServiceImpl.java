@@ -127,8 +127,9 @@ public class MathPracticeServiceImpl implements MathPracticeService {
 
     @Override
     public MathPracticeProgressVO getProgress(String macAddress) {
-        // 今日=自然日、周=7 天滚动（含今日），口径依服务器时区（部署为 UTC+8，#29）
-        ZoneId zone = ZoneId.systemDefault();
+        // 今日=自然日、周=7 天滚动（含今日）。#29 决议口径为 UTC+8，硬编码而非随 JVM
+        // 时区漂移（容器默认 UTC 会把「今日」滚动推迟 8 小时且无任何报错）
+        ZoneId zone = ZoneId.of("Asia/Shanghai");
         Date todayStart = Date.from(java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant());
         Date weekStart = Date.from(java.time.LocalDate.now(zone).minusDays(6).atStartOfDay(zone).toInstant());
 

@@ -158,8 +158,12 @@ def _remember_streak_end(device_id: str, streak: int) -> None:
 
 
 def _device_push_lock(device_id: str) -> asyncio.Lock:
-    if len(_push_locks) > 1024:  # ponytail: 同上，与 _last_streak_end 同一上限策略
+    if len(_push_locks) > 1024:
+        # ponytail: 粗上限防连接churn膨胀。只清未被持有的锁——在途任务持有的锁被清后，
+        # 同设备 setdefault 出的新锁会绕过 FIFO 互斥（评审发现）。真到千设备量级再换 LRU。
+        held = {k: v for k, v in _push_locks.items() if v.locked()}
         _push_locks.clear()
+        _push_locks.update(held)
     return _push_locks.setdefault(device_id, asyncio.Lock())
 
 
@@ -207,8 +211,10 @@ async def _push_locked(conn: "ConnectionHandler", s: dict | None) -> None:
         return
     try:
         agg = await manage_api_client.get_math_practice_progress(conn.device_id, token)
-    except Exception:
-        return  # 聚合拉取失败跳过本次，下一次判决补推
+    except Exception as e:
+        # 持续性失败（如 token 配错 401）打 warning 可观测；瞬时失败同样跳过，下一次判决补推
+        conn.logger.bind(tag=TAG).warning(f"学习进度聚合拉取失败: {e}")
+        return
     if agg is None:
         return
     payload = _overlay_live(agg, s) if s is not None else agg
