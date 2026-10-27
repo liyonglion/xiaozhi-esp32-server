@@ -98,6 +98,8 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-title/**", "server");
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/voiceClone/play/**", "anon");
+        // P2 学习进度屏聚合（#29）：anon + controller 自校验 X-Progress-Token（公网 IP 枚举面）
+        filterMap.put("/math-practice/progress", "anon");
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 

@@ -43,6 +43,11 @@ renren:
     enabled: true
     exclude-urls:
 
+# 口算练习 P2 学习进度屏（#29）：/math-practice/progress 的访问令牌，
+# 固件开机首拉与 xiaozhi-server 聚合拉取共用；部署时与固件约定（空=拒绝所有）
+math-practice:
+  progress-token: '${MATH_PRACTICE_PROGRESS_TOKEN:}'
+
 #mybatis
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml

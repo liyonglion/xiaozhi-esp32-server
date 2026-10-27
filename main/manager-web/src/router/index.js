@@ -26,6 +26,13 @@ const routes = [
     }
   },
   {
+    path: '/math-practice-config',
+    name: 'MathPracticeConfig',
+    component: function () {
+      return import('../views/MathPracticeConfig.vue')
+    }
+  },
+  {
     path: '/login',
     name: 'login',
     component: function () {

@@ -162,6 +162,11 @@ plugins:
       - ".wav"
       - ".p3"
     refresh_time: 300 # 刷新音乐列表的时间间隔，单位为秒
+  # 口算练习插件（math_practice：start_practice / submit_answer / end_practice）
+  math_practice:
+    count: 10 # 每轮题量（5~20，#23 决议默认 10）
+    nudge_seconds: 30 # 无作答轻推间隔（两级超时，#23 决议；0 关闭）
+    progress_token: "" # 学习进度聚合接口令牌（#29；与 manager-api math-practice.progress-token 及固件约定，空=关闭推送）
   search_from_ragflow:
     # 知识库的描述信息，方便大语言模型知道什么时候调用
     description: "当用户问xxx时，调用本方法，使用知识库中的信息回答问题"
@@ -271,6 +276,7 @@ Intent:
       - get_weather
       - get_news_from_newsnow
       - play_music
+      - math_practice # 口算练习（模块名，展开为 start_practice/submit_answer/end_practice）
   function_call:
     # 不需要动type
     type: function_call
@@ -287,6 +293,7 @@ Intent:
       # play_music是服务器自带的音乐播放，hass_play_music是通过home assistant控制的独立外部程序音乐播放
       # 如果用了hass_play_music，就不要开启play_music，两者只留一个
       - play_music
+      - math_practice # 口算练习（模块名，展开为 start_practice/submit_answer/end_practice）
       #- hass_state
       #- hass_play_music
 
