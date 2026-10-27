@@ -43,6 +43,56 @@
 
             <div v-if="selectedMac" v-loading="loading" class="todo-layout">
               <div class="editor-pane">
+                <div class="daily-section">
+                  <div class="pane-head">
+                    <span class="pane-title">{{ $t("todoList.dailyTitle") }}</span>
+                    <span class="count-hint">{{ dailyCount }} / 30</span>
+                  </div>
+                  <div class="daily-hint">{{ $t("todoList.dailyHint") }}</div>
+                  <div v-for="group in dailyGroups" :key="group.key" class="daily-group">
+                    <span class="template-group-label">{{ group.label }}</span>
+                    <div class="daily-rows">
+                      <div v-for="(row, idx) in group.rows" :key="idx" class="daily-row">
+                        <el-input
+                          v-model="row.text"
+                          size="small"
+                          class="daily-text"
+                          :maxlength="30"
+                          @input="markDailyDirty"
+                        />
+                        <el-time-picker
+                          v-model="row.deadline"
+                          size="small"
+                          class="daily-deadline"
+                          :clearable="true"
+                          value-format="HH:mm"
+                          format="HH:mm"
+                          :placeholder="$t('todoList.deadlinePlaceholder')"
+                          @change="markDailyDirty"
+                        />
+                        <el-button
+                          type="text"
+                          class="item-remove"
+                          :title="$t('todoList.removeItem')"
+                          @click="removeDailyRow(group, idx)"
+                        >✕</el-button>
+                      </div>
+                      <el-button size="small" type="text" class="daily-add" @click="addDailyRow(group)">
+                        + {{ $t("todoList.dailyAdd") }}
+                      </el-button>
+                      <span v-if="!group.rows.length" class="daily-empty">{{ $t("todoList.dailyEmpty") }}</span>
+                    </div>
+                  </div>
+                  <div class="daily-save-row">
+                    <el-button size="small" type="primary" plain :loading="dailySaving" @click="saveDaily">
+                      {{ $t("todoList.dailySave") }}
+                    </el-button>
+                    <span class="save-hint">{{ $t("todoList.dailySaveHint") }}</span>
+                  </div>
+                </div>
+
+                <div class="section-divider"></div>
+
                 <div class="pane-head">
                   <span class="pane-title">{{ $t("todoList.editorTitle") }}</span>
                   <span class="count-hint">{{ items.length }} / 30</span>
@@ -96,6 +146,41 @@
                   </div>
                 </div>
 
+                <div class="device-config">
+                  <span class="pane-title">{{ $t("todoList.deviceConfigTitle") }}</span>
+                  <div class="config-row">
+                    <span class="config-label">{{ $t("todoList.syncEnabled") }}</span>
+                    <el-switch v-model="config.syncEnabled" @change="markDirty" />
+                    <span class="config-hint">{{ $t("todoList.syncEnabledHint") }}</span>
+                  </div>
+                  <div class="config-row">
+                    <span class="config-label">{{ $t("todoList.quietPeriod") }}</span>
+                    <el-time-picker
+                      v-model="config.quietStart"
+                      size="small"
+                      class="config-time"
+                      value-format="HH:mm"
+                      format="HH:mm"
+                      @change="markDirty"
+                    />
+                    <span class="config-sep">–</span>
+                    <el-time-picker
+                      v-model="config.quietEnd"
+                      size="small"
+                      class="config-time"
+                      value-format="HH:mm"
+                      format="HH:mm"
+                      @change="markDirty"
+                    />
+                    <span class="config-hint">{{ $t("todoList.quietHint") }}</span>
+                  </div>
+                  <div class="config-row">
+                    <span class="config-label">{{ $t("todoList.maxItemsLabel") }}</span>
+                    <el-input-number v-model="config.maxItems" size="small" :min="1" :max="30" @change="markDirty" />
+                    <span class="config-hint">{{ $t("todoList.maxItemsHint") }}</span>
+                  </div>
+                </div>
+
                 <div class="save-row">
                   <el-button type="primary" :loading="saving" @click="save">{{ $t("todoList.save") }}</el-button>
                   <span class="save-hint">{{ $t("todoList.saveHint") }}</span>
@@ -146,7 +231,15 @@ const TEMPLATE_KEYS = {
   bedtime: ["tplBath", "tplBrushTeethNight", "tplBedtimeStory", "tplPackBag"],
 };
 
+// 每日任务四组（与后端 DAILY_GROUPS 白名单保持同步）
+const DAILY_GROUP_KEYS = ["morning", "study", "chores", "bedtime"];
+
 const MAX_ITEMS = 30; // 与设备契约一致（服务端同口径拒绝）
+
+const emptyDailyGroups = () =>
+  DAILY_GROUP_KEYS.map((key) => ({ key, rows: [] }));
+
+const defaultConfig = () => ({ syncEnabled: true, quietStart: "21:00", quietEnd: "07:00", maxItems: 30 });
 
 export default {
   name: "TodoListConfigPage",
@@ -162,7 +255,11 @@ export default {
       items: [],
       newTaskText: "",
       mirror: { deviceOnline: false, pending: false },
-      dirty: false, // 本地有未保存编辑：轮询只刷徽标，不覆盖 items
+      config: defaultConfig(), // 设备级配置（#33 评论补充）：随整表保存一并提交
+      dailyGroups: emptyDailyGroups(), // 上区「每日任务」四组
+      dailyDirty: false,
+      dailySaving: false,
+      dirty: false, // 本地有未保存编辑：轮询只刷徽标，不覆盖 items/config
       fetchSeq: 0,
       pollTimer: null,
     };
@@ -174,6 +271,9 @@ export default {
         label: this.$t(`todoList.group_${key}`),
         items: TEMPLATE_KEYS[key].map((k) => this.$t(`todoList.${k}`)),
       }));
+    },
+    dailyCount() {
+      return this.dailyGroups.reduce((n, g) => n + g.rows.length, 0);
     },
   },
   methods: {
@@ -204,7 +304,10 @@ export default {
         this.stopPolling();
         return;
       }
+      this.dirty = false;
+      this.dailyDirty = false;
       this.fetchMirror();
+      this.fetchDaily();
       this.startPolling();
     },
     fetchMirror() {
@@ -222,8 +325,37 @@ export default {
         const m = data.data || {};
         if (!this.dirty) {
           this.items = (m.items || []).map((i) => ({ text: i.text || "", done: !!i.done }));
+          this.config = {
+            syncEnabled: m.syncEnabled !== false,
+            quietStart: m.quietStart || "21:00",
+            quietEnd: m.quietEnd || "07:00",
+            maxItems: m.maxItems || 30,
+          };
         }
         this.mirror = { deviceOnline: !!m.deviceOnline, pending: !!m.pending };
+      });
+    },
+    fetchDaily() {
+      const seq = ++this.fetchSeq; // 与 fetchMirror 共用序号：切换设备后丢弃滞后响应
+      Api.todoList.getDailyTemplates(this.selectedMac, ({ data }) => {
+        if (seq !== this.fetchSeq) {
+          return;
+        }
+        if (data?.code !== 0) {
+          this.$message.error(data?.msg || i18n.t("todoList.fetchFailed"));
+          return;
+        }
+        if (this.dailyDirty) {
+          return; // 本地有未保存编辑，不覆盖
+        }
+        const groups = emptyDailyGroups();
+        (data.data || []).forEach((t) => {
+          const group = groups.find((g) => g.key === t.group);
+          if (group) {
+            group.rows.push({ text: t.text || "", deadline: t.deadline || null });
+          }
+        });
+        this.dailyGroups = groups;
       });
     },
     startPolling() {
@@ -270,6 +402,46 @@ export default {
       this.items.splice(idx, 1);
       this.dirty = true;
     },
+    markDailyDirty() {
+      this.dailyDirty = true;
+    },
+    addDailyRow(group) {
+      if (this.dailyCount >= MAX_ITEMS) {
+        this.$message.warning(i18n.t("todoList.maxItems"));
+        return;
+      }
+      group.rows.push({ text: "", deadline: null });
+      this.dailyDirty = true;
+    },
+    removeDailyRow(group, idx) {
+      group.rows.splice(idx, 1);
+      this.dailyDirty = true;
+    },
+    saveDaily() {
+      const items = [];
+      this.dailyGroups.forEach((g) =>
+        g.rows.forEach((r) => {
+          const text = (r.text || "").trim();
+          if (text) {
+            items.push({ group: g.key, text, deadline: r.deadline || null });
+          }
+        })
+      );
+      if (items.length > MAX_ITEMS) {
+        this.$message.warning(i18n.t("todoList.maxItems"));
+        return;
+      }
+      this.dailySaving = true;
+      Api.todoList.saveDailyTemplates({ macAddress: this.selectedMac, items }, ({ data }) => {
+        this.dailySaving = false;
+        if (data?.code === 0) {
+          this.$message.success(i18n.t("todoList.dailySaveSuccess"));
+          this.dailyDirty = false;
+        } else {
+          this.$message.error(data?.msg || i18n.t("todoList.saveFailed"));
+        }
+      });
+    },
     save() {
       const items = this.items
         .map((i) => ({ text: (i.text || "").trim(), done: !!i.done }))
@@ -279,7 +451,16 @@ export default {
         return;
       }
       this.saving = true;
-      Api.todoList.saveTodoList({ macAddress: this.selectedMac, items }, ({ data }) => {
+      // 设备级配置块随整表保存一并提交（#33 评论补充；后端 null=不修改，这里全量带上）
+      const payload = {
+        macAddress: this.selectedMac,
+        items,
+        syncEnabled: !!this.config.syncEnabled,
+        quietStart: this.config.quietStart || null,
+        quietEnd: this.config.quietEnd || null,
+        maxItems: this.config.maxItems || null,
+      };
+      Api.todoList.saveTodoList(payload, ({ data }) => {
         this.saving = false;
         if (data?.code === 0) {
           this.$message.success(i18n.t("todoList.saveSuccess"));
@@ -456,6 +637,119 @@ export default {
   padding: 10px 12px;
   border: 1px solid #e8f0ff;
   border-radius: 8px;
+}
+
+// ── 上区「每日任务」（#33，原型变体 D 两区结构） ──
+.daily-section {
+  padding: 12px 14px;
+  border: 1px solid #e8f0ff;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.daily-hint {
+  font-size: 12px;
+  color: #979db1;
+  margin-bottom: 10px;
+}
+
+.daily-group {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 0;
+  border-top: 1px dashed #e8f0ff;
+
+  &:first-of-type {
+    border-top: none;
+  }
+}
+
+.daily-rows {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.daily-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.daily-text {
+  width: 240px;
+}
+
+.daily-deadline {
+  width: 120px;
+}
+
+.daily-add {
+  padding: 2px 0;
+}
+
+.daily-empty {
+  font-size: 12px;
+  color: #979db1;
+}
+
+.daily-save-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.section-divider {
+  height: 1px;
+  margin: 18px 0 12px;
+  background: #e8f0ff;
+}
+
+// ── 设备级配置块（#33 评论补充：同步开关/静默时段/条数上限，随整表保存提交） ──
+.device-config {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid #e8f0ff;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .pane-title {
+    font-size: 14px;
+  }
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.config-label {
+  font-size: 13px;
+  color: #3d4566;
+  width: 64px;
+  flex-shrink: 0;
+}
+
+.config-time {
+  width: 110px;
+}
+
+.config-sep {
+  color: #979db1;
+}
+
+.config-hint {
+  font-size: 12px;
+  color: #979db1;
 }
 
 .templates-title {
