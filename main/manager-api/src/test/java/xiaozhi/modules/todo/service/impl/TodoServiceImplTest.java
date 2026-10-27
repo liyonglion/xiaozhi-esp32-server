@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -408,6 +409,29 @@ class TodoServiceImplTest {
         assertFalse(registry.isOnline("BB")); // 上一轮的 BB 未续报即离线
         now.addAndGet(TodoOnlineRegistry.TTL_MILLIS + 1);
         assertFalse(registry.isOnline("AA")); // 超过 TTL 未续报即离线（xiaozhi-server 重启兜底）
+    }
+
+    @Test
+    void onlineRegistryReportNeverExposesClearedWindowToConcurrentReaders() throws Exception {
+        // H6：reportOnline 必须原子换新引用——先 clear 再 putAll 的窗口期（每 60s 一次）
+        // 会让并发 isOnline 看到全员离线，家长页在线徽标闪断
+        TodoOnlineRegistry registry = new TodoOnlineRegistry();
+        registry.reportOnline(List.of("AA"));
+        AtomicBoolean sawOffline = new AtomicBoolean(false);
+        Thread reader = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted() && !sawOffline.get()) {
+                if (!registry.isOnline("AA")) {
+                    sawOffline.set(true);
+                }
+            }
+        });
+        reader.start();
+        for (int i = 0; i < 5_000 && !sawOffline.get(); i++) {
+            registry.reportOnline(List.of("AA", "BB"));
+        }
+        reader.interrupt();
+        reader.join(2_000);
+        assertFalse(sawOffline.get(), "reportOnline 窗口期并发 isOnline 不得看到在线设备离线");
     }
 
     @Test

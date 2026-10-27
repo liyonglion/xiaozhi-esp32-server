@@ -19,7 +19,7 @@ public class TodoOnlineRegistry {
     /** 上报周期 60s，TTL 150s（2.5 个周期）容忍一轮上报抖动 */
     public static final long TTL_MILLIS = 150_000L;
 
-    private final Map<String, Long> lastSeen = new ConcurrentHashMap<>();
+    private volatile Map<String, Long> lastSeen = new ConcurrentHashMap<>();
     private volatile LongSupplier clock = System::currentTimeMillis;
 
     /** 测试接缝：注入可控时钟 */
@@ -27,7 +27,8 @@ public class TodoOnlineRegistry {
         this.clock = clock;
     }
 
-    /** 全量上报：本轮未报的 mac 立即视为离线（集合即权威答案） */
+    /** 全量上报：本轮未报的 mac 立即视为离线（集合即权威答案）。
+     *  原子换新引用（不可变模式）：clear+putAll 的窗口期会让并发 isOnline 短暂看到全员离线。 */
     public void reportOnline(List<String> macs) {
         long now = clock.getAsLong();
         Map<String, Long> fresh = new ConcurrentHashMap<>();
@@ -38,8 +39,7 @@ public class TodoOnlineRegistry {
                 }
             }
         }
-        lastSeen.clear();
-        lastSeen.putAll(fresh);
+        lastSeen = fresh;
     }
 
     public boolean isOnline(String mac) {
