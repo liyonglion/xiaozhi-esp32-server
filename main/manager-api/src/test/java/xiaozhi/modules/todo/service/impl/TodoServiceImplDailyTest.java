@@ -1,5 +1,6 @@
 package xiaozhi.modules.todo.service.impl;
 
+import static xiaozhi.modules.todo.service.impl.TodoTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -43,8 +44,6 @@ import xiaozhi.modules.todo.service.TodoOnlineRegistry;
  */
 class TodoServiceImplDailyTest {
 
-    private static final long USER_ID = 42L;
-
     @BeforeAll
     static void initTableInfo() {
         // 纯 mock 单测无 Spring 上下文：手工初始化 MyBatis-Plus 实体元数据，供 LambdaWrapper 解析列名
@@ -52,66 +51,6 @@ class TodoServiceImplDailyTest {
                 new MybatisConfiguration(), ""), TodoMirrorEntity.class);
         TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(
                 new MybatisConfiguration(), ""), TodoDailyTemplateEntity.class);
-    }
-
-    static TodoItemDTO item(String text, boolean done) {
-        TodoItemDTO i = new TodoItemDTO();
-        i.setText(text);
-        i.setDone(done);
-        return i;
-    }
-
-    static TodoItemDTO item(String text, boolean done, String due) {
-        TodoItemDTO i = item(text, done);
-        i.setDue(due);
-        return i;
-    }
-
-    static TodoDailyItemDTO tpl(String group, String text, String deadline) {
-        TodoDailyItemDTO t = new TodoDailyItemDTO();
-        t.setGroup(group);
-        t.setText(text);
-        t.setDeadline(deadline);
-        return t;
-    }
-
-    static TodoDailySaveDTO dailySave(String mac, TodoDailyItemDTO... items) {
-        TodoDailySaveDTO dto = new TodoDailySaveDTO();
-        dto.setMacAddress(mac);
-        dto.setItems(List.of(items));
-        return dto;
-    }
-
-    static TodoDailyTemplateEntity storedTpl(String mac, String group, String text, String deadline, int sort) {
-        TodoDailyTemplateEntity e = new TodoDailyTemplateEntity();
-        e.setMacAddress(mac);
-        e.setGroupKey(group);
-        e.setText(text);
-        e.setDeadline(deadline);
-        e.setSort(sort);
-        return e;
-    }
-
-    static TodoMirrorEntity storedMirror(String mac, TodoItemDTO... items) {
-        TodoMirrorEntity e = new TodoMirrorEntity();
-        e.setId("row-1");
-        e.setMacAddress(mac);
-        e.setItems(xiaozhi.common.utils.JsonUtils.toJsonString(List.of(items)));
-        e.setSyncEnabled(1);
-        e.setPending(0);
-        return e;
-    }
-
-    static DeviceEntity ownedDevice() {
-        DeviceEntity d = new DeviceEntity();
-        d.setUserId(USER_ID);
-        return d;
-    }
-
-    static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoDailyTemplateDao dailyDao,
-            DeviceService deviceService) {
-        return new TodoServiceImpl(mirrorDao, mock(TodoEventDao.class), deviceService, new TodoOnlineRegistry(),
-                dailyDao);
     }
 
     // ───────────────────────── T3：模板管理（GET/PUT /todo-list/daily） ─────────────────────────
@@ -253,7 +192,7 @@ class TodoServiceImplDailyTest {
         when(deviceService.getDeviceByMacAddress("AA")).thenReturn(ownedDevice());
         when(mirrorDao.selectOne(any())).thenReturn(storedMirror("AA", item("旧任务", false)));
 
-        TodoReportDTO save = TodoServiceImplTest.report("AA", item("新任务", false));
+        TodoReportDTO save = report("AA", item("新任务", false));
         save.setSyncEnabled(false);
         save.setQuietStart("22:00");
         save.setQuietEnd("08:00");
@@ -283,15 +222,15 @@ class TodoServiceImplDailyTest {
             su.when(SecurityUser::getUserId).thenReturn(USER_ID);
             TodoServiceImpl service = newService(mirrorDao, mock(TodoDailyTemplateDao.class), deviceService);
 
-            TodoReportDTO badQuiet = TodoServiceImplTest.report("AA", item("刷牙", false));
+            TodoReportDTO badQuiet = report("AA", item("刷牙", false));
             badQuiet.setQuietStart("9:00"); // 非 HH:MM
             assertThrows(RenException.class, () -> service.saveTodoListForUser(badQuiet));
 
-            TodoReportDTO badEnd = TodoServiceImplTest.report("AA", item("刷牙", false));
+            TodoReportDTO badEnd = report("AA", item("刷牙", false));
             badEnd.setQuietEnd("24:30"); // 时越界
             assertThrows(RenException.class, () -> service.saveTodoListForUser(badEnd));
 
-            TodoReportDTO badMax = TodoServiceImplTest.report("AA", item("刷牙", false));
+            TodoReportDTO badMax = report("AA", item("刷牙", false));
             badMax.setMaxItems(31); // 超 30
             assertThrows(RenException.class, () -> service.saveTodoListForUser(badMax));
 

@@ -1,5 +1,6 @@
 package xiaozhi.modules.todo.service.impl;
 
+import static xiaozhi.modules.todo.service.impl.TodoTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,52 +45,11 @@ import xiaozhi.modules.todo.vo.TodoMirrorVO;
 
 class TodoServiceImplTest {
 
-    private static final long USER_ID = 42L;
-
     @BeforeAll
     static void initTableInfo() {
         // 纯 mock 单测无 Spring 上下文：手工初始化 MyBatis-Plus 实体元数据，供 LambdaUpdateWrapper 解析列名
         TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(
                 new MybatisConfiguration(), ""), TodoMirrorEntity.class);
-    }
-
-    private static final TypeReference<List<TodoItemDTO>> ITEM_LIST = new TypeReference<>() {
-    };
-
-    static TodoItemDTO item(String text, boolean done) {
-        TodoItemDTO i = new TodoItemDTO();
-        i.setText(text);
-        i.setDone(done);
-        return i;
-    }
-
-    static TodoReportDTO report(String mac, TodoItemDTO... items) {
-        TodoReportDTO dto = new TodoReportDTO();
-        dto.setMacAddress(mac);
-        dto.setItems(List.of(items));
-        return dto;
-    }
-
-    static List<TodoItemDTO> parseItems(String json) {
-        return JsonUtils.parseObject(json, ITEM_LIST);
-    }
-
-    /** 统一构造：服务新增依赖后，老用例不必逐个改构造 */
-    static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoEventDao eventDao, DeviceService deviceService) {
-        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, new TodoOnlineRegistry(),
-                mock(TodoDailyTemplateDao.class));
-    }
-
-    static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoEventDao eventDao, DeviceService deviceService,
-            TodoOnlineRegistry registry) {
-        return new TodoServiceImpl(mirrorDao, eventDao, deviceService, registry, mock(TodoDailyTemplateDao.class));
-    }
-
-    /** 归属当前测试用户的设备（配合 MockedStatic SecurityUser） */
-    static DeviceEntity ownedDevice() {
-        DeviceEntity d = new DeviceEntity();
-        d.setUserId(USER_ID);
-        return d;
     }
 
     @Test

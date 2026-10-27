@@ -1,5 +1,6 @@
 package xiaozhi.modules.todo.service.impl;
 
+import static xiaozhi.modules.todo.service.impl.TodoTestFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,57 +41,12 @@ import xiaozhi.modules.todo.vo.TodoMirrorVO;
 /** T4（#34）：截止时刻 due——服务端侧字段，存镜像 items JSON、API 透出、模板 deadline 被重建消费。 */
 class TodoServiceImplDueTest {
 
-    private static final long USER_ID = 42L;
-
     @BeforeAll
     static void initTableInfo() {
         TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(
                 new MybatisConfiguration(), ""), TodoMirrorEntity.class);
         TableInfoHelper.initTableInfo(new org.apache.ibatis.builder.MapperBuilderAssistant(
                 new MybatisConfiguration(), ""), TodoDailyTemplateEntity.class);
-    }
-
-    static TodoItemDTO item(String text, boolean done) {
-        TodoItemDTO i = new TodoItemDTO();
-        i.setText(text);
-        i.setDone(done);
-        return i;
-    }
-
-    static TodoItemDTO item(String text, boolean done, String due) {
-        TodoItemDTO i = item(text, done);
-        i.setDue(due);
-        return i;
-    }
-
-    static TodoReportDTO report(String mac, TodoItemDTO... items) {
-        TodoReportDTO dto = new TodoReportDTO();
-        dto.setMacAddress(mac);
-        dto.setItems(List.of(items));
-        return dto;
-    }
-
-    static TodoMirrorEntity storedMirror(String mac, TodoItemDTO... items) {
-        TodoMirrorEntity e = new TodoMirrorEntity();
-        e.setId("row-1");
-        e.setMacAddress(mac);
-        e.setItems(JsonUtils.toJsonString(List.of(items)));
-        e.setSyncEnabled(1);
-        e.setPending(0);
-        return e;
-    }
-
-    static DeviceService ownedDeviceService() {
-        DeviceService deviceService = mock(DeviceService.class);
-        DeviceEntity d = new DeviceEntity();
-        d.setUserId(USER_ID);
-        when(deviceService.getDeviceByMacAddress("AA")).thenReturn(d);
-        return deviceService;
-    }
-
-    static TodoServiceImpl newService(TodoMirrorDao mirrorDao, TodoDailyTemplateDao dailyDao) {
-        return new TodoServiceImpl(mirrorDao, mock(TodoEventDao.class), ownedDeviceService(),
-                new TodoOnlineRegistry(), dailyDao);
     }
 
     // ───────────────────────── due 存取与透出 ─────────────────────────
@@ -111,7 +67,7 @@ class TodoServiceImplDueTest {
 
             ArgumentCaptor<TodoMirrorEntity> captor = ArgumentCaptor.forClass(TodoMirrorEntity.class);
             verify(mirrorDao).insert(captor.capture());
-            List<TodoItemDTO> stored = TodoServiceImplTest.parseItems(captor.getValue().getItems());
+            List<TodoItemDTO> stored = parseItems(captor.getValue().getItems());
             assertEquals("20:30", stored.get(0).getDue()); // due 落镜像 JSON
             assertNull(stored.get(1).getDue());
             assertEquals("20:30", vo.getItems().get(0).getDue()); // API 透出
@@ -176,7 +132,7 @@ class TodoServiceImplDueTest {
 
         ArgumentCaptor<TodoMirrorEntity> captor = ArgumentCaptor.forClass(TodoMirrorEntity.class);
         verify(mirrorDao).updateById(captor.capture());
-        List<TodoItemDTO> stored = TodoServiceImplTest.parseItems(captor.getValue().getItems());
+        List<TodoItemDTO> stored = parseItems(captor.getValue().getItems());
         assertEquals("20:30", stored.get(0).getDue()); // 同文本任务：due 随清单留存
         assertNull(stored.get(1).getDue()); // 新任务无 due
         assertEquals(2, stored.size()); // 被删任务的 due 一并消失
@@ -207,7 +163,7 @@ class TodoServiceImplDueTest {
 
         ArgumentCaptor<TodoMirrorEntity> captor = ArgumentCaptor.forClass(TodoMirrorEntity.class);
         verify(mirrorDao).updateById(captor.capture());
-        List<TodoItemDTO> merged = TodoServiceImplTest.parseItems(captor.getValue().getItems());
+        List<TodoItemDTO> merged = parseItems(captor.getValue().getItems());
         assertEquals("21:00", merged.get(0).getDue()); // 模板 deadline → 当日项 due
         assertNull(merged.get(1).getDue());
         assertEquals("18:00", merged.get(2).getDue()); // 手动项 due 保留
