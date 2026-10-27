@@ -1,4 +1,4 @@
-"""设备 Todo 清单：镜像上报（T1）+ 家长编辑下发闭环（spec #30 T2 / #32）。
+"""设备 Todo 清单：镜像上报（T1）+ 家长编辑下发闭环（T2）+ 截止提醒（spec #30 T4 / #34）。
 
 设备 NVS 是清单唯一真值源；本模块挂在 MCP set_todos 调用的返回路径上，
 把 receipt 中的全量清单异步上报 manager-api 存镜像（per-device FIFO 锁保序，
@@ -9,11 +9,22 @@ T2 增两件基础设施（spec #30「服务端基础设施」）：
 - 60s 同步循环（照 gc_manager 模式，app.py 挂载）：周期上报在线 mac 集合、
   扫 pending → 对在线设备经 MCP set_todos(replace) 整表下发 → receipt ok 清 pending；
   离线保留 pending，上线即达。
+
+T4 截止提醒：server 只做翻译与簿记，不做提醒扫描、不推 TTS——
+- 翻译：items 的服务端侧 due（HH:MM）→ due−1h / due−30m 两个提醒点，经设备已有
+  self.clock.set_alarm 设置（静默时段内的点不设；deadline<=now 的过期点过滤后才调
+  set_alarm，防设备把已过时刻顺延成次日幽灵闹钟）；
+- 簿记：模块级 mac→[{text,kind,time,message,id}]；下发成功后先 cancel 旧映射再按最新
+  items 重设；语音 receipt 里任务完成/文本消失（删除/改写）→ 按簿记 cancel；
+- 对账：60s 循环对新上线连接用 self.clock.list 以 message 为匹配键比对——簿记有而设备
+  没有（设备重启丢闹钟）→ 过期过滤后重设；设备有而簿记没有（server 重启）→ 收养重建簿记；
+- 重试：set_alarm 返回「时间未同步」error 视为可重试（簿记 id 置 None 不确认，下轮循环再设）。
 """
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from core.providers.tools.device_mcp import call_mcp_tool
@@ -61,6 +72,7 @@ def on_set_todos_receipt(conn: "ConnectionHandler", raw_result: str) -> None:
     todos = parse_receipt(raw_result)
     if todos is None:
         return
+    _drop_finished_alarms(conn.device_id, todos)  # T4：完成/删除/改写 → 按簿记 cancel 对应提醒
     task = asyncio.create_task(_report_locked(conn, todos))
     _report_tasks.add(task)
     task.add_done_callback(_report_tasks.discard)
@@ -131,7 +143,7 @@ todo_sync_manager = TodoSyncManager()
 
 
 async def run_sync_cycle() -> None:
-    """单轮同步：上报在线集合 → 拉 pending → 逐台在线设备整表下发（pending 序即下发序）。"""
+    """单轮同步：上报在线集合 → 拉 pending → 逐台在线设备整表下发（pending 序即下发序）→ 提醒对账面。"""
     from config import manage_api_client
 
     try:
@@ -142,20 +154,23 @@ async def run_sync_cycle() -> None:
     try:
         pending = await manage_api_client.get_todo_pending()
     except Exception as e:
+        pending = None
         _log("warning", f"todo 待下发清单拉取中断: {e}")
-        return
-    if not pending:
-        return
 
-    for row in pending:
-        mac = row.get("mac")
-        conn = _connections.get(mac) if mac else None
-        if conn is None:
-            continue  # 离线：pending 保留，上线后下一轮即达
-        try:
-            await _push_and_confirm(conn, row.get("items") or [])
-        except Exception as e:  # 单台失败不挡后续设备，也不炸循环
-            _log("warning", f"todo 下发 {mac} 中断: {e}")
+    if pending:
+        for row in pending:
+            mac = row.get("mac")
+            conn = _connections.get(mac) if mac else None
+            if conn is None:
+                continue  # 离线：pending 保留，上线后下一轮即达
+            quiet = (row.get("quietStart") or DEFAULT_QUIET_START, row.get("quietEnd") or DEFAULT_QUIET_END)
+            _quiet_cfg[mac] = quiet  # 提醒翻译的设备级静默配置随 pending 行捎带
+            try:
+                await _push_and_confirm(conn, row.get("items") or [])
+            except Exception as e:  # 单台失败不挡后续设备，也不炸循环
+                _log("warning", f"todo 下发 {mac} 中断: {e}")
+
+    await _alarm_ensure_pass()
 
 
 async def _push_and_confirm(conn: "ConnectionHandler", items: list) -> None:
@@ -173,7 +188,7 @@ async def _push_and_confirm(conn: "ConnectionHandler", items: list) -> None:
     try:
         raw = await call_mcp_tool(
             conn, mcp, "set_todos",
-            {"action": "replace", "text": json.dumps(items, ensure_ascii=False)},
+            {"action": "replace", "text": json.dumps(strip_due(items), ensure_ascii=False)},
         )
     finally:
         setattr(conn, _PUSHING_ATTR, False)
@@ -187,6 +202,7 @@ async def _push_and_confirm(conn: "ConnectionHandler", items: list) -> None:
         await manage_api_client.report_todo_delivered(conn.device_id, todos)
     except Exception as e:
         _log("warning", f"todo 送达回执中断 {conn.device_id}: {e}")  # 回执丢失由下一轮重发兜底
+    await _reset_alarms(conn, items, todos)  # T4：送达成功 → 按最新 items（含 due）重设当日提醒闹钟
 
 
 def _log(level: str, msg: str) -> None:
@@ -221,3 +237,213 @@ def _device_lock(device_id: str) -> asyncio.Lock:
         _locks.clear()
         _locks.update(held)
     return _locks.setdefault(device_id, asyncio.Lock())
+
+
+# ───────────────────────── T4：截止提醒（翻译 + 簿记 + 对账，spec #30 / #34） ─────────────────────────
+
+REMINDER_TEXTS = {"1h": "还有1小时到截止:{text}", "30m": "还有半小时到截止:{text}"}
+DEFAULT_QUIET_START = "21:00"
+DEFAULT_QUIET_END = "07:00"
+
+# 设备 MCP 工具名经 sanitize_tool_name 点号转下划线（mcp_client.tools 以净化名为键）
+CLOCK_SET_ALARM = "self_clock_set_alarm"
+CLOCK_CANCEL = "self_clock_cancel"
+CLOCK_LIST = "self_clock_list"
+
+_alarms: dict[str, list[dict]] = {}  # 簿记 mac→[{text,kind,time,message,id}]；id=None 未确认（待重试）
+_quiet_cfg: dict[str, tuple[str, str]] = {}  # mac→(quiet_start,quiet_end)，随 pending 行捎带刷新
+_ensured_conns: dict[str, "ConnectionHandler"] = {}  # mac→已对账连接（重连=新对象→重新对账）
+_bg_tasks: set[asyncio.Task] = set()  # fire-and-forget 闹钟 cancel（持引用防 GC）
+
+
+def _hm_to_min(hm) -> int | None:
+    try:
+        h, m = hm.split(":")
+        minutes = int(h) * 60 + int(m)
+    except (AttributeError, ValueError):
+        return None
+    return minutes if 0 <= minutes < 1440 else None
+
+
+def _min_to_hm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _now_min() -> int:
+    return datetime.now().hour * 60 + datetime.now().minute
+
+
+def translate_due(due, text: str, *, now_hm: str | None = None,
+                  quiet_start: str = DEFAULT_QUIET_START, quiet_end: str = DEFAULT_QUIET_END) -> list[dict]:
+    """due(HH:MM) → 提醒点 [{kind,time,message}]：due−1h 与 due−30m 两档，按时间序。
+
+    过滤顺序（spec #30「截止提醒语义」）：负值点（跨零点回退到昨日）与 deadline<=now 的
+    过期点直接丢弃——设备对已过 HH:MM 会静默顺延明天，不过滤即产生次日幽灵闹钟；
+    落静默时段 [quiet_start, quiet_end)（支持跨零点）的点不设。非法 due 返回空。
+    """
+    due_min = _hm_to_min(due)
+    if due_min is None:
+        return []
+    now_min = _hm_to_min(now_hm) if now_hm is not None else _now_min()
+    qs, qe = _hm_to_min(quiet_start), _hm_to_min(quiet_end)
+    specs = []
+    for kind, delta in (("1h", 60), ("30m", 30)):
+        point = due_min - delta
+        if point < 0 or point <= now_min:
+            continue
+        if qs is not None and qe is not None:
+            in_quiet = qs <= point < qe if qs <= qe else point >= qs or point < qe
+            if in_quiet:
+                continue
+        specs.append({"kind": kind, "time": _min_to_hm(point),
+                      "message": REMINDER_TEXTS[kind].format(text=text)})
+    return specs
+
+
+def parse_reminder_message(message) -> tuple[str, str] | None:
+    """播报文本 → (task_text, kind)：message 是簿记与对账恢复共用的匹配键。"""
+    if not isinstance(message, str):
+        return None
+    for kind, prefix in (("1h", "还有1小时到截止:"), ("30m", "还有半小时到截止:")):
+        if message.startswith(prefix) and len(message) > len(prefix):
+            return message[len(prefix):], kind
+    return None
+
+
+def strip_due(items: list) -> list[dict]:
+    """设备契约 {text,done} 不得漂移：下发前剥离服务端侧字段 due（外层键一并收窄）。"""
+    return [{"text": i.get("text"), "done": i.get("done")} for i in items if isinstance(i, dict)]
+
+
+async def _clock_call(conn: "ConnectionHandler", tool: str, args: dict):
+    """经 MCP 调设备闹钟工具；旧固件未注册 self.clock.* / 未就绪 → None（静默跳过，照 math_practice 门槛）。"""
+    mcp = getattr(conn, "mcp_client", None)
+    if mcp is None or not mcp.has_tool(tool) or not await mcp.is_ready():
+        return None
+    return await call_mcp_tool(conn, mcp, tool, args)
+
+
+async def _set_reminder_alarm(conn: "ConnectionHandler", rec: dict) -> bool:
+    """设单个提醒闹钟并落簿记 id。True=已确认或待重试（时间未同步，id 置 None，下轮循环再设）；
+    False=应放弃该记录（其它错误/工具不可用）。"""
+    try:
+        raw = await _clock_call(conn, CLOCK_SET_ALARM, {"time": rec["time"], "message": rec["message"]})
+    except Exception as e:
+        if "not synced" in str(e).lower():
+            rec["id"] = None  # 设备时间未同步：可重试，簿记未确认
+            return True
+        _log("warning", f"todo 提醒闹钟设置失败 {conn.device_id}: {e}")
+        return False
+    if raw is None:
+        return False
+    try:
+        rec["id"] = json.loads(raw).get("id")
+    except (json.JSONDecodeError, AttributeError):
+        return False
+    return True
+
+
+async def _cancel_alarm(conn: "ConnectionHandler", alarm_id) -> None:
+    try:
+        await _clock_call(conn, CLOCK_CANCEL, {"id": alarm_id})
+    except Exception:
+        pass  # id 已不在设备上（响过/已取消/重启丢失）=目标已达成
+
+
+async def _reset_alarms(conn: "ConnectionHandler", items: list, echo: list) -> None:
+    """admin 保存 / 每日重建下发成功后：先 cancel 该设备全部旧映射，再按最新 items（含 due）设当日闹钟。"""
+    mac = conn.device_id
+    for rec in _alarms.pop(mac, []):
+        if rec.get("id") is not None:
+            await _cancel_alarm(conn, rec["id"])
+    echo_done = {t["text"]: t["done"] for t in echo}
+    quiet = _quiet_cfg.get(mac, (DEFAULT_QUIET_START, DEFAULT_QUIET_END))
+    records = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        text, due = it.get("text"), it.get("due")
+        if not due or echo_done.get(text) is not False:
+            continue  # 无截止 / 设备上已完成 / 文本不在回执（送达期间被改写）→ 不设
+        records.extend({**spec, "text": text, "id": None}
+                       for spec in translate_due(due, text, quiet_start=quiet[0], quiet_end=quiet[1]))
+    kept = [r for r in records if await _set_reminder_alarm(conn, r)]
+    _alarms[mac] = kept
+
+
+def _drop_finished_alarms(mac: str, todos: list) -> None:
+    """语音 receipt 联动：任务勾选完成或文本消失（删除/改写=remove+add）→ 按簿记 cancel 对应闹钟。
+    簿记同步收缩，cancel 异步执行（绝不阻塞语音主流程）。"""
+    records = _alarms.get(mac)
+    if not records:
+        return
+    state = {t["text"]: t["done"] for t in todos}
+    keep = [r for r in records if state.get(r["text"]) is False]
+    dropped = [r for r in records if state.get(r["text"]) is not False]
+    _alarms[mac] = keep
+    conn = _connections.get(mac)
+    if dropped and conn is not None:
+        _spawn(_cancel_booked(conn, dropped))
+
+
+async def _cancel_booked(conn: "ConnectionHandler", records: list) -> None:
+    for r in records:
+        if r.get("id") is not None:
+            await _cancel_alarm(conn, r["id"])
+
+
+async def _reconcile_alarms(mac: str, conn: "ConnectionHandler") -> None:
+    """上线对账：self.clock.list 与簿记互相补齐——message 为匹配键。
+    簿记有而设备没有（设备重启丢闹钟）→ 过期过滤后重设；设备有而簿记没有（server 重启）→ 收养重建。"""
+    try:
+        raw = await _clock_call(conn, CLOCK_LIST, {})
+    except Exception as e:
+        _log("warning", f"todo 提醒对账 list 失败 {mac}: {e}")
+        return  # 不标记已对账：下轮循环重试
+    if raw is None:
+        _ensured_conns[mac] = conn
+        return
+    try:
+        listed = json.loads(raw).get("alarms") or []
+    except (json.JSONDecodeError, AttributeError):
+        listed = []
+    on_device = {a["message"]: a for a in listed
+                 if isinstance(a, dict) and isinstance(a.get("message"), str)}
+    records = _alarms.setdefault(mac, [])
+    for msg, alarm in on_device.items():  # 收养：重建 server 重启丢失的簿记
+        parsed = parse_reminder_message(msg)
+        if parsed is None or any(r["message"] == msg for r in records):
+            continue
+        ring = str(alarm.get("ring_at") or "")
+        records.append({"text": parsed[0], "kind": parsed[1],
+                        "time": ring.split(" ")[-1] if ":" in ring else None,
+                        "message": msg, "id": alarm.get("id")})
+    now_min = _now_min()
+    for rec in list(records):
+        if rec["message"] in on_device and rec.get("id") is not None:
+            continue  # 设备上在位：无需动作
+        point = _hm_to_min(rec.get("time"))
+        if point is None or point <= now_min:
+            records.remove(rec)  # 提醒点已过：不重设（重设会被设备顺延成次日幽灵闹钟）
+            continue
+        if not await _set_reminder_alarm(conn, rec):
+            records.remove(rec)
+    _ensured_conns[mac] = conn
+
+
+async def _alarm_ensure_pass() -> None:
+    """60s 循环的提醒面：新上线连接（重连/重启）对账；簿记存在未确认记录（时间未同步）重试。"""
+    for mac, conn in list(_connections.items()):
+        records = _alarms.get(mac) or []
+        if _ensured_conns.get(mac) is conn and all(r.get("id") is not None for r in records):
+            continue
+        try:
+            await _reconcile_alarms(mac, conn)
+        except Exception as e:
+            _log("warning", f"todo 提醒对账 {mac} 中断: {e}")
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
