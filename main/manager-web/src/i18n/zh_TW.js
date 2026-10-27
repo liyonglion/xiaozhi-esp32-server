@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': '每日任務已儲存，明天 0 點生效',
   'todoList.deadlinePlaceholder': '截止 選填',
   'todoList.dueHint': '設截止的任務將在提前 1 小時和 30 分鐘時各語音提醒一次，完成後自動取消',
+  'todoList.switchConfirm': '目前裝置的修改尚未儲存，切換裝置將丟棄這些修改，確定切換嗎？',
   'todoList.deviceConfigTitle': '裝置級配置',
   'todoList.syncEnabled': '清單同步',
   'todoList.syncEnabledHint': '關閉後：鏡像上報、家長下發與每日重建對本裝置全部停用',

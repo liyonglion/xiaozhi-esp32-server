@@ -272,6 +272,8 @@ export default {
       dailySaving: false,
       dirty: false, // 本地有未保存编辑：轮询只刷徽标，不覆盖 items/config
       fetchSeq: 0,
+      dailySeq: 0, // 独立于 fetchSeq：两路请求各自比对，互不丢弃对方响应
+      loadedMac: "", // 当前已加载到编辑器的设备：切换取消时回退用
       pollTimer: null,
     };
   },
@@ -315,15 +317,29 @@ export default {
         this.stopPolling();
         return;
       }
+      if (this.dirty || this.dailyDirty) {
+        const from = this.loadedMac;
+        this.$confirm(i18n.t("todoList.switchConfirm"))
+          .then(() => this.loadDevice())
+          .catch(() => {
+            this.selectedMac = from || ""; // 放弃切换，回到已加载设备
+          });
+        return;
+      }
+      this.loadDevice();
+    },
+    loadDevice() {
       this.dirty = false;
       this.dailyDirty = false;
       this.fetchMirror();
       this.fetchDaily();
       this.startPolling();
     },
-    fetchMirror() {
+    fetchMirror(silent = false) {
       const seq = ++this.fetchSeq;
-      this.loading = true;
+      if (!silent) {
+        this.loading = true;
+      }
       Api.todoList.getTodoList(this.selectedMac, ({ data }) => {
         if (seq !== this.fetchSeq) {
           return; // 已切到其他设备，丢弃滞后响应
@@ -344,12 +360,13 @@ export default {
           };
         }
         this.mirror = { deviceOnline: !!m.deviceOnline, pending: !!m.pending };
+        this.loadedMac = this.selectedMac;
       });
     },
     fetchDaily() {
-      const seq = ++this.fetchSeq; // 与 fetchMirror 共用序号：切换设备后丢弃滞后响应
+      const seq = ++this.dailySeq; // 独立序号：只丢弃 daily 自己的滞后响应
       Api.todoList.getDailyTemplates(this.selectedMac, ({ data }) => {
-        if (seq !== this.fetchSeq) {
+        if (seq !== this.dailySeq) {
           return;
         }
         if (data?.code !== 0) {
@@ -375,7 +392,7 @@ export default {
       this.stopPolling();
       this.pollTimer = setInterval(() => {
         if (!this.saving) {
-          this.fetchMirror();
+          this.fetchMirror(true); // 静默轮询：不闪 loading 遮罩
         }
       }, 15000);
     },

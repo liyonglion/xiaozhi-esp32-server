@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': 'Daily tasks saved — they take effect at the next 0:00 rebuild',
   'todoList.deadlinePlaceholder': 'Deadline (opt.)',
   'todoList.dueHint': 'Tasks with a deadline get a voice reminder 1 hour and 30 minutes before it; cancelled automatically once done',
+  'todoList.switchConfirm': 'You have unsaved changes for this device. Switching will discard them. Switch anyway?',
   'todoList.deviceConfigTitle': 'Device settings',
   'todoList.syncEnabled': 'List sync',
   'todoList.syncEnabledHint': 'Off: mirror reports, parent pushes and the daily rebuild all stop for this device',

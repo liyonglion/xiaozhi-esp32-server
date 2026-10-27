@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': 'Đã lưu nhiệm vụ hằng ngày — hiệu lực ở lần dựng lại 0:00 tiếp theo',
   'todoList.deadlinePlaceholder': 'Hạn (tùy chọn)',
   'todoList.dueHint': 'Nhiệm vụ có hạn chót sẽ được nhắc bằng giọng nói trước 1 giờ và 30 phút; tự hủy khi hoàn thành',
+  'todoList.switchConfirm': 'Các thay đổi chưa lưu của thiết bị này sẽ bị mất khi chuyển thiết bị. Vẫn chuyển?',
   'todoList.deviceConfigTitle': 'Cấu hình thiết bị',
   'todoList.syncEnabled': 'Đồng bộ danh sách',
   'todoList.syncEnabledHint': 'Tắt: báo mirror, tải xuống của phụ huynh và dựng lại hằng ngày đều dừng cho thiết bị này',

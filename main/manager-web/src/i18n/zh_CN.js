@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': '每日任务已保存，明天 0 点生效',
   'todoList.deadlinePlaceholder': '截止 选填',
   'todoList.dueHint': '设截止的任务将在提前 1 小时和 30 分钟时各语音提醒一次，完成后自动取消',
+  'todoList.switchConfirm': '当前设备的修改尚未保存，切换设备将丢弃这些修改，确定切换吗？',
   'todoList.deviceConfigTitle': '设备级配置',
   'todoList.syncEnabled': '清单同步',
   'todoList.syncEnabledHint': '关闭后：镜像上报、家长下发与每日重建对本设备全部停用',

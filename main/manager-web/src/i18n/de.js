@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': 'Tägliche Aufgaben gespeichert — wirksam beim nächsten 0:00-Neuaufbau',
   'todoList.deadlinePlaceholder': 'Frist (optional)',
   'todoList.dueHint': 'Aufgaben mit Frist erhalten 1 Stunde und 30 Minuten vorher je eine Spracherinnerung; nach Erledigung automatisch gestrichen',
+  'todoList.switchConfirm': 'Ungespeicherte Änderungen für dieses Gerät gehen beim Wechsel verloren. Trotzdem wechseln?',
   'todoList.deviceConfigTitle': 'Geräteeinstellungen',
   'todoList.syncEnabled': 'Listen-Sync',
   'todoList.syncEnabledHint': 'Aus: Spiegelberichte, Übertragungen und der tägliche Neuaufbau sind für dieses Gerät gestoppt',

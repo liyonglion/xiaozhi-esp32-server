@@ -1767,6 +1767,7 @@ export default {
   'todoList.dailySaveSuccess': 'Tarefas diárias salvas — valem na próxima reconstrução à 0:00',
   'todoList.deadlinePlaceholder': 'Prazo (opc.)',
   'todoList.dueHint': 'Tarefas com prazo recebem um lembrete de voz 1 hora e 30 minutos antes; cancelado automaticamente ao concluir',
+  'todoList.switchConfirm': 'As alterações não salvas deste dispositivo serão descartadas ao trocar. Trocar mesmo assim?',
   'todoList.deviceConfigTitle': 'Configurações do dispositivo',
   'todoList.syncEnabled': 'Sincronização',
   'todoList.syncEnabledHint': 'Desligado: espelhamento, envios dos pais e a reconstrução diária param para este dispositivo',
