@@ -33,6 +33,13 @@ const routes = [
     }
   },
   {
+    path: '/todo-list-config',
+    name: 'TodoListConfig',
+    component: function () {
+      return import('../views/TodoListConfig.vue')
+    }
+  },
+  {
     path: '/login',
     name: 'login',
     component: function () {

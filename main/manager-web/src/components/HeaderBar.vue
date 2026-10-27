@@ -101,6 +101,15 @@
           }" />
           <span class="nav-text">{{ $t("header.mathPractice") }}</span>
         </div>
+        <div class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/todo-list-config' }"
+          @click="handleRouter('todoListConfig')">
+          <img loading="lazy" alt="" src="@/assets/header/robot.png" :style="{
+            filter:
+              $route.path === '/todo-list-config' ? 'brightness(0) invert(1)' : 'None',
+          }" />
+          <span class="nav-text">{{ $t("header.todoList") }}</span>
+        </div>
         <el-dropdown v-if="userInfo.superAdmin" trigger="click" class="equipment-management more-dropdown" :class="{
           'active-tab':
             $route.path === '/dict-management' ||
@@ -230,6 +239,7 @@ export default {
         serverSideManagement: "/server-side-management",
         featureManagement: "/feature-management",
         mathPracticeConfig: "/math-practice-config",
+        todoListConfig: "/todo-list-config",
       }
     };
   },

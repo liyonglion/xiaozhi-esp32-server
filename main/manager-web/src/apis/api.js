@@ -13,6 +13,7 @@ import knowledgeBase from './module/knowledgeBase.js'
 import correctWord from './module/correctWord.js'
 import addressBook from './module/addressBook.js'
 import mathPractice from './module/mathPractice.js'
+import todoList from './module/todoList.js'
 
 
 
@@ -47,5 +48,6 @@ export default {
     knowledgeBase,
     correctWord,
     addressBook,
-    mathPractice
+    mathPractice,
+    todoList
   }
