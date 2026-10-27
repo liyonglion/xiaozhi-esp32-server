@@ -1,16 +1,15 @@
 """设备 Todo 截止提醒测试（spec #30 T4 / #34）：闹钟翻译 + 簿记联动 + 上线对账 + 下发剥离 due。
 
-mock 边界收在 manage_api_client 与连接对象处（照 test_todo_downlink 先例），走真实
-call_mcp_tool 路径验证 self.clock.* 出参与簿记状态。
+mock 边界收在 manage_api_client 与连接对象处（FakeMCPClient/FakeWS/wire_conn 收敛在 conftest），
+走真实 call_mcp_tool 路径验证 self.clock.* 出参与簿记状态。
 """
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
-from loguru import logger
 
 from mcp_services import todo_sync
+from tests.mcp_services.conftest import wire_conn
 
 MAC = "AA:BB:CC:DD:EE:FF"
 
@@ -85,7 +84,8 @@ CLOCK_TOOLS = ("set_todos", "self_clock_set_alarm", "self_clock_cancel", "self_c
 
 class Toolbox:
     """设备端回环：按工具名预设 receipt；记录全部 tools/call 出参。
-    set_alarm 自动发号并登记在册（self.clock.list 如实反映，含预置闹钟）。"""
+    set_alarm 自动发号并登记在册（self.clock.list 如实反映，含预置闹钟）。
+    set_alarm_receipt 非 None → set_alarm 回执原样返回（仍登记在册），模拟不带 id 键的固件回执。"""
 
     def __init__(self, todos_receipt='{"ok": true, "todos": []}', listed=None):
         self.calls = []  # (tool_name, arguments)
@@ -93,7 +93,13 @@ class Toolbox:
         self.todos_receipt = todos_receipt
         self.device_alarms = list(listed.get("alarms", [])) if listed else []  # 设备闹钟在册表
         self.set_alarm_reply = None  # Exception → future 结算为异常
+        self.set_alarm_receipt = None  # 非 None → set_alarm 回执原样用（如 '{"ok": true}' 无 id）
         self.cancel_reply = '{"id": 0, "cancelled": true}'
+
+    def responder(self, name, args):
+        """conftest.FakeWS 的 responder：先记录出参再按工具名结算回执。"""
+        self.calls.append((name, args))
+        return self.receipt_for(name, args)
 
     def receipt_for(self, name, args):
         if name == "set_todos":
@@ -106,6 +112,8 @@ class Toolbox:
             self.device_alarms.append({"id": alarm_id, "type": "alarm",
                                        "ring_at": f"10-27 {args.get('time', '00:00')}",
                                        "message": args.get("message", "")})
+            if self.set_alarm_receipt is not None:
+                return self.set_alarm_receipt
             return json.dumps({"id": alarm_id, "type": "alarm",
                                "ring_at": f"10-27 {args.get('time', '00:00')}",
                                "in_minutes": 1, "message": args.get("message", "")})
@@ -118,55 +126,8 @@ class Toolbox:
         return "ok"
 
 
-class FakeWS:
-    def __init__(self, conn, toolbox):
-        self._conn = conn
-        self._toolbox = toolbox
-
-    async def send(self, message):
-        m = json.loads(message)
-        mc = self._conn.mcp_client
-        if m.get("type") == "mcp" and m["payload"].get("method") == "tools/call":
-            name = m["payload"]["params"]["name"]
-            args = m["payload"]["params"].get("arguments")
-            self._toolbox.calls.append((name, args))
-            fut = mc.futures.get(m["payload"]["id"])
-            if fut and not fut.done():
-                reply = self._toolbox.receipt_for(name, args)
-                if isinstance(reply, Exception):
-                    fut.set_exception(reply)
-                elif reply is not None:
-                    fut.set_result({"content": [{"text": reply}]})
-
-
-class FakeMCPClient:
-    def __init__(self, tools, ready=True):
-        self.tools = {name: {"description": name, "inputSchema": {}} for name in tools}
-        self.name_mapping = {}
-        self.ready = ready
-        self.futures = {}
-
-    def has_tool(self, name):
-        return name in self.tools
-
-    async def is_ready(self):
-        return self.ready
-
-    async def get_next_id(self):
-        return len(self.futures) + 1
-
-    async def register_call_result_future(self, tid, future):
-        self.futures[tid] = future
-
-    async def cleanup_call_result(self, tid):
-        self.futures.pop(tid, None)
-
-
-def wire_conn(toolbox, mac=MAC, tools=CLOCK_TOOLS, ready=True):
-    conn = SimpleNamespace(device_id=mac, logger=logger, features={"mcp": True})
-    conn.mcp_client = FakeMCPClient(tools, ready=ready)
-    conn.websocket = FakeWS(conn, toolbox)
-    return conn
+def wire_toolbox(toolbox, mac=MAC, tools=CLOCK_TOOLS, ready=True):
+    return wire_conn(mac, toolbox.responder, tools=tools, ready=ready)
 
 
 def clock_calls(toolbox, name):
@@ -221,7 +182,7 @@ class TestDownlinkStripAndReset:
     async def test_device_payload_strips_due(self, monkeypatch, fixed_now):
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
 
@@ -233,7 +194,7 @@ class TestDownlinkStripAndReset:
     async def test_push_success_sets_translated_alarm_pair(self, monkeypatch, fixed_now):
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
 
@@ -246,7 +207,7 @@ class TestDownlinkStripAndReset:
     async def test_push_cancels_old_booked_alarms_before_resetting(self, monkeypatch, fixed_now):
         echo = json.dumps({"ok": True, "todos": [{"text": "新任务", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         todo_sync._alarms[MAC] = [seed_record(text="旧任务", message="还有半小时到截止:旧任务", alarm_id=77)]
         stub_manage_api(monkeypatch, [pending_row([{"text": "新任务", "done": False}])])
@@ -260,7 +221,7 @@ class TestDownlinkStripAndReset:
         # 送达期间孩子勾掉一项、另一项文本被改写（不在回执）：均不设闹钟
         echo = json.dumps({"ok": True, "todos": [{"text": "读绘本", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([
             {"text": "写作业", "done": False, "due": "20:30"},   # 回执里已完成 → 不设
@@ -280,7 +241,7 @@ class TestDownlinkStripAndReset:
         # 设备级静默 20:30–07:00（随 pending 行下发）：due 21:00 的 30m 点 20:30 落静默 → 只设 1h 点 20:00
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row(
             [{"text": "写作业", "done": False, "due": "21:00"}], quiet=("20:30", "07:00"))])
@@ -292,7 +253,7 @@ class TestDownlinkStripAndReset:
     async def test_old_firmware_without_clock_tools_skips_alarms(self, monkeypatch, fixed_now):
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
-        conn = wire_conn(toolbox, tools=("set_todos",))  # 旧固件：无 self.clock.*
+        conn = wire_toolbox(toolbox, tools=("set_todos",))  # 旧固件：无 self.clock.*
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
 
@@ -307,7 +268,7 @@ class TestVoiceCancel:
 
     async def test_completed_task_alarms_cancelled(self, monkeypatch):
         toolbox = Toolbox()
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         todo_sync._alarms[MAC] = [
             seed_record(kind="1h", time="19:30", message=MSG_1H, alarm_id=11),
@@ -328,7 +289,7 @@ class TestVoiceCancel:
 
     async def test_deleted_or_rewritten_text_cancels_alarms(self, monkeypatch):
         toolbox = Toolbox()
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         todo_sync._alarms[MAC] = [seed_record(alarm_id=21)]
         async def fake_report(mac, items):
@@ -345,7 +306,7 @@ class TestVoiceCancel:
 
     async def test_no_bookkeeping_means_no_clock_calls(self, monkeypatch):
         toolbox = Toolbox()
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         async def fake_report(mac, items):
             return None
@@ -363,7 +324,7 @@ class TestReconcile:
 
     async def test_device_reboot_resets_missing_booked_alarms(self, monkeypatch, fixed_now):
         toolbox = Toolbox()  # 设备重启后闹钟在册表为空（重启丢闹钟）
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         todo_sync._alarms[MAC] = [seed_record(alarm_id=5), seed_record(kind="1h", time="19:30", message=MSG_1H, alarm_id=6)]
         stub_manage_api(monkeypatch, [])
@@ -378,7 +339,7 @@ class TestReconcile:
     async def test_expired_missing_alarm_is_dropped_not_reset(self, monkeypatch):
         monkeypatch.setattr(todo_sync, "_now_min", lambda: 10 * 60 + 30)  # 10:30
         toolbox = Toolbox(listed={"count": 0, "alarms": []})
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         todo_sync._alarms[MAC] = [seed_record(time="10:00", alarm_id=5)]  # 提醒点已过
         stub_manage_api(monkeypatch, [])
@@ -392,7 +353,7 @@ class TestReconcile:
         toolbox = Toolbox(listed={"count": 1, "alarms": [
             {"id": 99, "type": "alarm", "ring_at": "10-27 20:00", "in_minutes": 600, "message": MSG_30M},
         ]})
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [])
 
@@ -412,7 +373,7 @@ class TestReconcile:
 
     async def test_stable_connection_not_relisted_every_cycle(self, monkeypatch, fixed_now):
         toolbox = Toolbox()
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [])
 
@@ -429,7 +390,7 @@ class TestRetrySemantics:
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
         toolbox.set_alarm_reply = RuntimeError("MCP错误: Device time is not synced yet, cannot set an alarm")
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
 
@@ -452,7 +413,7 @@ class TestRetrySemantics:
         echo = json.dumps({"ok": True, "todos": [{"text": "写作业", "done": False}]}, ensure_ascii=False)
         toolbox = Toolbox(todos_receipt=echo)
         toolbox.set_alarm_reply = ValueError("boom")
-        conn = wire_conn(toolbox)
+        conn = wire_toolbox(toolbox)
         todo_sync.register_connection(MAC, conn)
         stub_manage_api(monkeypatch, [pending_row([{"text": "写作业", "done": False, "due": "20:30"}])])
 

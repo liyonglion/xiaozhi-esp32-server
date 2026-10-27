@@ -1,64 +1,21 @@
 """设备 Todo 下发闭环测试（spec #30 T2 / #32）：连接注册表 + 60s 循环扫 pending → set_todos(replace) → 清 pending。
 
-mock 边界收在 manage_api_client 与连接对象处（照 test_todo_sync 的 FakeMCPClient/FakeWS 先例），
+mock 边界收在 manage_api_client 与连接对象处（FakeMCPClient/FakeWS/wire_conn 收敛在 conftest），
 走真实 call_mcp_tool 路径验证 MCP 出参与 receipt 挂钩抑制。
 """
-import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
-from loguru import logger
 
 from mcp_services import todo_sync
+from tests.mcp_services.conftest import static_receipt, tick, wire_conn
 
 MAC_A = "AA:AA:AA:AA:AA:01"
 MAC_B = "AA:AA:AA:AA:AA:02"
 
 
-class FakeWS:
-    """设备端 MCP 回环：记录 tools/call 出参，并按预设 receipt 结算 future。"""
-
-    def __init__(self, conn, receipt_text):
-        self._conn = conn
-        self._receipt = receipt_text
-        self.sent = []
-
-    async def send(self, message):
-        m = json.loads(message)
-        self.sent.append(m)
-        mc = self._conn.mcp_client
-        if m.get("type") == "mcp" and m["payload"].get("method") == "tools/call":
-            fut = mc.futures.get(m["payload"]["id"])
-            if fut and not fut.done():
-                fut.set_result({"content": [{"text": self._receipt}]})
-
-
-class FakeMCPClient:
-    def __init__(self, tools=("set_todos",), ready=True):
-        self.tools = {name: {"description": name, "inputSchema": {}} for name in tools}
-        self.name_mapping = {}
-        self.ready = ready
-        self.futures = {}
-
-    def has_tool(self, name):
-        return name in self.tools
-
-    async def is_ready(self):
-        return self.ready
-
-    async def get_next_id(self):
-        return len(self.futures) + 1
-
-    async def register_call_result_future(self, tid, future):
-        self.futures[tid] = future
-
-
-def wire_conn(mac, receipt_text='{"ok": true, "todos": []}', tools=("set_todos",), ready=True):
-    conn = SimpleNamespace(device_id=mac, logger=logger, features={"mcp": True})
-    conn.mcp_client = FakeMCPClient(tools, ready=ready)
-    conn.websocket = FakeWS(conn, receipt_text)
-    return conn
+def wire_static(mac, receipt_text='{"ok": true, "todos": []}', tools=("set_todos",), ready=True):
+    return wire_conn(mac, static_receipt(receipt_text), tools=tools, ready=ready)
 
 
 def pending_entry(mac, items):
@@ -69,26 +26,29 @@ def pending_entry(mac, items):
 def _clean_registry():
     yield
     todo_sync._connections.clear()
+    todo_sync._alarms.clear()
+    todo_sync._quiet_cfg.clear()
+    todo_sync._ensured_conns.clear()
 
 
 class TestConnectionRegistry:
     """模块级 mac→conn 注册表（照 math _timers dict 先例）：重连顶替与注销身份守卫。"""
 
     def test_register_and_lookup(self):
-        conn = wire_conn(MAC_A)
+        conn = wire_static(MAC_A)
         todo_sync.register_connection(MAC_A, conn)
         assert todo_sync.connection_for(MAC_A) is conn
         assert todo_sync.connection_for(MAC_B) is None
 
     def test_reconnect_replaces_and_old_close_does_not_evict_new(self):
-        old, new = wire_conn(MAC_A), wire_conn(MAC_A)
+        old, new = wire_static(MAC_A), wire_static(MAC_A)
         todo_sync.register_connection(MAC_A, old)
         todo_sync.register_connection(MAC_A, new)  # 重连：新句柄顶替
         todo_sync.unregister_connection(MAC_A, old)  # 旧连接随后关闭
         assert todo_sync.connection_for(MAC_A) is new
 
     def test_unregister_unknown_mac_is_noop(self):
-        todo_sync.unregister_connection(MAC_B, wire_conn(MAC_B))  # 不抛错即通过
+        todo_sync.unregister_connection(MAC_B, wire_static(MAC_B))  # 不抛错即通过
 
 
 class TestSyncCycle:
@@ -97,7 +57,7 @@ class TestSyncCycle:
     async def test_pushes_pending_to_online_device_and_clears(self, monkeypatch):
         todos = [{"text": "读绘本", "done": False}]
         receipt = json.dumps({"ok": True, "todos": todos}, ensure_ascii=False)
-        conn = wire_conn(MAC_A, receipt)
+        conn = wire_static(MAC_A, receipt)
         todo_sync.register_connection(MAC_A, conn)
         online_reports, delivered, pending_pulls = [], [], []
 
@@ -148,7 +108,7 @@ class TestSyncCycle:
         assert delivered == []
 
     async def test_old_firmware_without_tool_is_skipped(self, monkeypatch):
-        conn = wire_conn(MAC_A, tools=("get_time",))  # 未注册 set_todos 的旧固件
+        conn = wire_static(MAC_A, tools=("get_time",))  # 未注册 set_todos 的旧固件
         todo_sync.register_connection(MAC_A, conn)
         delivered = []
 
@@ -171,7 +131,7 @@ class TestSyncCycle:
         assert conn.websocket.sent == []  # 未发起任何 MCP 调用
 
     async def test_failed_receipt_keeps_pending_for_retry(self, monkeypatch):
-        conn = wire_conn(MAC_A, '{"ok": false, "todos": []}')  # 设备拒绝（如 NVS 写满）
+        conn = wire_static(MAC_A, '{"ok": false, "todos": []}')  # 设备拒绝（如 NVS 写满）
         todo_sync.register_connection(MAC_A, conn)
         delivered = []
 
@@ -199,7 +159,7 @@ class TestSyncCycle:
         for mac in (MAC_A, MAC_B):
             todos = [{"text": mac, "done": False}]
             receipts[mac] = json.dumps({"ok": True, "todos": todos}, ensure_ascii=False)
-            conns[mac] = wire_conn(mac, receipts[mac])
+            conns[mac] = wire_static(mac, receipts[mac])
             todo_sync.register_connection(mac, conns[mac])
         delivered = []
 
@@ -223,7 +183,7 @@ class TestSyncCycle:
     async def test_downlink_push_does_not_fire_voice_report_hook(self, monkeypatch):
         """下发 replace 的 receipt 不走 T1 语音上报（否则旧内容回写镜像、来源错记 voice）。"""
         todos = [{"text": "读绘本", "done": False}]
-        conn = wire_conn(MAC_A, json.dumps({"ok": True, "todos": todos}, ensure_ascii=False))
+        conn = wire_static(MAC_A, json.dumps({"ok": True, "todos": todos}, ensure_ascii=False))
         todo_sync.register_connection(MAC_A, conn)
         voice_reports = []
 
@@ -264,7 +224,7 @@ class TestSyncCycle:
         await todo_sync.run_sync_cycle()  # 不抛错即通过
 
     async def test_mcp_not_ready_is_skipped(self, monkeypatch):
-        conn = wire_conn(MAC_A, ready=False)
+        conn = wire_static(MAC_A, ready=False)
         todo_sync.register_connection(MAC_A, conn)
         delivered = []
 

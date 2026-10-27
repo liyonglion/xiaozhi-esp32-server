@@ -9,6 +9,7 @@ from loguru import logger
 
 from core.providers.tools.device_mcp.mcp_handler import call_mcp_tool
 from mcp_services import todo_sync
+from tests.mcp_services.conftest import static_receipt, wire_conn
 
 MAC = "AA:BB:CC:DD:EE:FF"
 
@@ -124,48 +125,6 @@ class TestReportHook:
 
 # ───────────────────────── mcp_handler 挂钩接线（真实 call_mcp_tool 路径） ─────────────────────────
 
-class FakeWS:
-    """设备端 MCP 响应回环：tools/call 请求立即按预设 receipt 结算 future。"""
-
-    def __init__(self, conn, receipt_text):
-        self._conn = conn
-        self._receipt = receipt_text
-
-    async def send(self, message):
-        m = json.loads(message)
-        mc = self._conn.mcp_client
-        if m.get("type") == "mcp" and m["payload"].get("method") == "tools/call":
-            fut = mc.futures.get(m["payload"]["id"])
-            if fut and not fut.done():
-                fut.set_result({"content": [{"text": self._receipt}]})
-
-
-class FakeMCPClient:
-    def __init__(self, tools):
-        self.tools = {name: {"description": name, "inputSchema": {}} for name in tools}
-        self.name_mapping = {}
-        self.ready = True
-        self.futures = {}
-
-    def has_tool(self, name):
-        return name in self.tools
-
-    async def is_ready(self):
-        return self.ready
-
-    async def get_next_id(self):
-        return len(self.futures) + 1
-
-    async def register_call_result_future(self, tid, future):
-        self.futures[tid] = future
-
-
-def wire_conn(receipt_text, tools=("set_todos",)):
-    conn = SimpleNamespace(device_id=MAC, logger=logger, features={"mcp": True})
-    conn.mcp_client = FakeMCPClient(tools)
-    conn.websocket = FakeWS(conn, receipt_text)
-    return conn
-
 
 class TestMcpHandlerWiring:
     async def test_set_todos_call_reports_receipt_full_list(self, monkeypatch):
@@ -177,7 +136,7 @@ class TestMcpHandlerWiring:
         monkeypatch.setattr("config.manage_api_client.report_todo_list", fake_report)
         todos = [{"text": "读绘本", "done": False}, {"text": "刷牙", "done": True}]
         receipt = json.dumps({"ok": True, "todos": todos}, ensure_ascii=False)
-        conn = wire_conn(receipt)
+        conn = wire_conn(MAC, static_receipt(receipt))
         raw = await call_mcp_tool(conn, conn.mcp_client, "set_todos",
                                   json.dumps({"action": "add", "text": "读绘本"}))
         assert raw == receipt  # 原返回值不受挂钩影响
@@ -191,9 +150,9 @@ class TestMcpHandlerWiring:
             reported.append(mac)
 
         monkeypatch.setattr("config.manage_api_client.report_todo_list", fake_report)
-        conn = wire_conn("ok", tools=("update_progress",))  # 非 set_todos 工具
+        conn = wire_conn(MAC, static_receipt("ok"), tools=("update_progress",))  # 非 set_todos 工具
         await call_mcp_tool(conn, conn.mcp_client, "update_progress", {})
-        conn2 = wire_conn(json.dumps({"ok": False, "todos": []}))  # set_todos 但失败 receipt
+        conn2 = wire_conn(MAC, static_receipt(json.dumps({"ok": False, "todos": []})))  # set_todos 但失败 receipt
         await call_mcp_tool(conn2, conn2.mcp_client, "set_todos", json.dumps({"action": "list"}))
         await drain()
         assert reported == []
