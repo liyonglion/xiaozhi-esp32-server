@@ -391,8 +391,14 @@ async def call_mcp_tool(
             content = raw_result.get("content")
             if isinstance(content, list) and len(content) > 0:
                 if isinstance(content[0], dict) and "text" in content[0]:
+                    text = content[0]["text"]
+                    if actual_name == "set_todos":
+                        # spec #30 T1：set_todos 返回路径挂钩，receipt 全量异步上报 manager-api 存镜像
+                        from mcp_services.todo_sync import on_set_todos_receipt
+
+                        on_set_todos_receipt(conn, text)
                     # 直接返回文本内容，不进行JSON解析
-                    return content[0]["text"]
+                    return text
         # 如果结果不是预期的格式，将其转换为字符串
         return str(raw_result)
     except asyncio.TimeoutError:

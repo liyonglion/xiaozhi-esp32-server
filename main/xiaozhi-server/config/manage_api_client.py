@@ -304,6 +304,19 @@ async def report_math_practice(
     )
 
 
+@api_guard("上报 todo 镜像失败")
+async def report_todo_list(instance, mac_address: str, todos: list) -> Optional[Dict]:
+    """上报设备全量任务清单（spec #30 T1：set_todos receipt 挂钩，服务端存镜像并 diff 完成事件）。
+
+    单次请求不走重试：镜像是整表 last-writer-wins，超时重试可能让旧清单
+    后到覆盖新状态；丢一次由下一次语音操作补上。
+    """
+    return await instance._async_request(
+        "POST", "/config/todo-list/report",
+        json={"macAddress": mac_address, "items": todos},
+    )
+
+
 @api_guard("生成并保存聊天记录总结失败")
 async def generate_and_save_chat_summary(instance, session_id: str) -> Optional[Dict]:
     """生成并保存聊天记录总结（守护线程中调用，服务已关闭时静默返回 None）"""
