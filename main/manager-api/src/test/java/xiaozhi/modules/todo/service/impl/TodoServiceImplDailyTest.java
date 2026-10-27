@@ -192,6 +192,35 @@ class TodoServiceImplDailyTest {
     }
 
     @Test
+    void saveDailyIsTransactional() throws NoSuchMethodException {
+        // H3：delete+insert 全量替换必须原子——中途失败整体回滚，不留空/半模板静默停掉 0 点重建
+        assertTrue(TodoServiceImpl.class.getMethod("saveDailyForUser", TodoDailySaveDTO.class)
+                .isAnnotationPresent(org.springframework.transaction.annotation.Transactional.class),
+                "saveDailyForUser 应有 @Transactional");
+    }
+
+    @Test
+    void saveDailyRetriesOnceOnConcurrentDuplicateKey() {
+        // H3：双击保存/双 tab 并发撞 (mac,group,text) 唯一键 → 重删重插一次，不 500
+        TodoDailyTemplateDao dailyDao = mock(TodoDailyTemplateDao.class);
+        DeviceService deviceService = mock(DeviceService.class);
+        when(deviceService.getDeviceByMacAddress("AA")).thenReturn(ownedDevice());
+        when(dailyDao.insert(any(TodoDailyTemplateEntity.class)))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("uk_todo_daily_mac_group_text"))
+                .thenReturn(1);
+
+        try (MockedStatic<SecurityUser> su = mockStatic(SecurityUser.class)) {
+            su.when(SecurityUser::getUserId).thenReturn(USER_ID);
+            List<TodoDailyItemDTO> saved = newService(mock(TodoMirrorDao.class), dailyDao, deviceService)
+                    .saveDailyForUser(dailySave("AA", tpl("morning", "刷牙", null)));
+
+            assertEquals(1, saved.size());
+            verify(dailyDao, org.mockito.Mockito.times(2)).delete(any()); // 首插撞唯一键后重删重插
+            verify(dailyDao, org.mockito.Mockito.times(2)).insert(any(TodoDailyTemplateEntity.class));
+        }
+    }
+
+    @Test
     void getDailyReturnsStoredRowsInSortOrderWithOwnerCheck() {
         TodoDailyTemplateDao dailyDao = mock(TodoDailyTemplateDao.class);
         DeviceService deviceService = mock(DeviceService.class);

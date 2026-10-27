@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -257,6 +258,7 @@ public class TodoServiceImpl implements TodoService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class) // 全量替换三步原子：中途失败整体回滚，不留空/半模板静默停掉 0 点重建
     public List<TodoDailyItemDTO> saveDailyForUser(TodoDailySaveDTO dto) {
         requireOwnedDevice(dto.getMacAddress());
         // 信任边界规整：空行静默剔除、30 字截断、(组,文本)去重保首；非法分组/截止时刻明确拒绝
@@ -285,15 +287,23 @@ public class TodoServiceImpl implements TodoService {
         if (cleaned.size() > MAX_ITEMS) {
             throw new RenException("每日任务最多 " + MAX_ITEMS + " 条（当前 " + cleaned.size() + " 条）");
         }
-        Date now = new Date();
-        Long userId = SecurityUser.getUserId();
+        try {
+            return replaceDailyRows(dto.getMacAddress(), cleaned, SecurityUser.getUserId(), new Date());
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // 双击保存/双 tab 并发整表替换撞 (mac,group,text) 唯一键：重删重插一次（照 writeMirror 并发回退先例，不 500）
+            return replaceDailyRows(dto.getMacAddress(), cleaned, SecurityUser.getUserId(), new Date());
+        }
+    }
+
+    private List<TodoDailyItemDTO> replaceDailyRows(String macAddress, List<TodoDailyItemDTO> cleaned,
+            Long userId, Date now) {
         dailyDao.delete(new LambdaQueryWrapper<TodoDailyTemplateEntity>()
-                .eq(TodoDailyTemplateEntity::getMacAddress, dto.getMacAddress())); // 全量替换
+                .eq(TodoDailyTemplateEntity::getMacAddress, macAddress)); // 全量替换
         List<TodoDailyItemDTO> saved = new ArrayList<>(cleaned.size());
         for (int i = 0; i < cleaned.size(); i++) {
             TodoDailyItemDTO c = cleaned.get(i);
             TodoDailyTemplateEntity row = new TodoDailyTemplateEntity();
-            row.setMacAddress(dto.getMacAddress());
+            row.setMacAddress(macAddress);
             row.setGroupKey(c.getGroup());
             row.setText(c.getText());
             row.setDeadline(c.getDeadline());
