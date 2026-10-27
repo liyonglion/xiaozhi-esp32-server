@@ -89,9 +89,17 @@ def register_connection(mac: str, conn: "ConnectionHandler") -> None:
 
 
 def unregister_connection(mac: str, conn: "ConnectionHandler") -> None:
-    """身份守卫注销：重连后新句柄已顶替时，旧连接的关闭不得误删新注册。"""
+    """身份守卫注销：重连后新句柄已顶替时，旧连接的关闭不得误删新注册。
+
+    同时清理该 mac 的簿记/对账标记/静默配置（H7）：_ensured_conns 持连接引用
+    （websocket/缓冲），设备更替下不清理即无界增长；重连后对账面按新连接重建、
+    设备侧在册闹钟照常收养，清理无损失。
+    """
     if _connections.get(mac) is conn:
         _connections.pop(mac, None)
+        _alarms.pop(mac, None)
+        _ensured_conns.pop(mac, None)
+        _quiet_cfg.pop(mac, None)
 
 
 def connection_for(mac: str) -> "ConnectionHandler | None":

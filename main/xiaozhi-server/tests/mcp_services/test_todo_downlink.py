@@ -53,6 +53,23 @@ class TestConnectionRegistry:
     def test_unregister_unknown_mac_is_noop(self):
         todo_sync.unregister_connection(MAC_B, wire_static(MAC_B))  # 不抛错即通过
 
+    def test_unregister_clears_per_mac_bookkeeping(self):
+        """H7：注销联动清理簿记/对账标记/静默配置——设备更替下 ConnectionHandler
+        （websocket/缓冲）等死引用不无界累积。"""
+        conn = wire_static(MAC_A)
+        todo_sync.register_connection(MAC_A, conn)
+        todo_sync._alarms[MAC_A] = [{"text": "x", "kind": "30m", "time": "20:00",
+                                     "message": "m", "id": 1, "confirmed": True}]
+        todo_sync._ensured_conns[MAC_A] = conn  # 持连接引用的正是这里
+        todo_sync._quiet_cfg[MAC_A] = ("21:00", "07:00")
+
+        todo_sync.unregister_connection(MAC_A, conn)
+
+        assert todo_sync.connection_for(MAC_A) is None
+        assert MAC_A not in todo_sync._alarms
+        assert MAC_A not in todo_sync._ensured_conns
+        assert MAC_A not in todo_sync._quiet_cfg
+
 
 class TestSyncCycle:
     """60s 循环的单轮：上报在线集合 → 拉 pending → 在线且有工具的设备 replace 下发 → 回执 ok 清 pending。"""
