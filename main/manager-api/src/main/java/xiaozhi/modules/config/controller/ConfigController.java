@@ -19,6 +19,8 @@ import xiaozhi.modules.config.service.ConfigService;
 import xiaozhi.modules.mathpractice.dto.MathPracticeReportDTO;
 import xiaozhi.modules.mathpractice.service.MathPracticeService;
 import xiaozhi.modules.mathpractice.vo.MathPracticeConfigVO;
+import xiaozhi.modules.todo.dto.TodoReportDTO;
+import xiaozhi.modules.todo.service.TodoService;
 
 /**
  * xiaozhi-server 配置获取
@@ -32,6 +34,7 @@ import xiaozhi.modules.mathpractice.vo.MathPracticeConfigVO;
 public class ConfigController {
     private final ConfigService configService;
     private final MathPracticeService mathPracticeService;
+    private final TodoService todoService;
 
     @PostMapping("server-base")
     @Operation(summary = "服务端获取配置接口")
@@ -70,6 +73,14 @@ public class ConfigController {
     public Result<Void> reportMathPractice(@Valid @RequestBody MathPracticeReportDTO dto) {
         ValidatorUtils.validateEntity(dto);
         mathPracticeService.reportRecord(dto);
+        return new Result<Void>();
+    }
+
+    @PostMapping("todo-list/report")
+    @Operation(summary = "上报设备全量任务清单（spec #30 T1：set_todos receipt 挂钩，存镜像并 diff 完成事件）")
+    public Result<Void> reportTodoList(@Valid @RequestBody TodoReportDTO dto) {
+        ValidatorUtils.validateEntity(dto);
+        todoService.reportTodoMirror(dto);
         return new Result<Void>();
     }
 }
