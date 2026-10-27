@@ -1766,11 +1766,12 @@ export default {
   'todoList.dailySaveHint': 'Gespeicherte Vorlagen wirken beim nächsten Neuaufbau um 0:00',
   'todoList.dailySaveSuccess': 'Tägliche Aufgaben gespeichert — wirksam beim nächsten 0:00-Neuaufbau',
   'todoList.deadlinePlaceholder': 'Frist (optional)',
+  'todoList.dueHint': 'Aufgaben mit Frist erhalten 1 Stunde und 30 Minuten vorher je eine Spracherinnerung; nach Erledigung automatisch gestrichen',
   'todoList.deviceConfigTitle': 'Geräteeinstellungen',
   'todoList.syncEnabled': 'Listen-Sync',
   'todoList.syncEnabledHint': 'Aus: Spiegelberichte, Übertragungen und der tägliche Neuaufbau sind für dieses Gerät gestoppt',
   'todoList.quietPeriod': 'Ruhezeit',
-  'todoList.quietHint': 'Keine Erinnerungen in der Ruhezeit (greift, sobald Frist-Erinnerungen kommen)',
+  'todoList.quietHint': 'Keine Erinnerungsalarme innerhalb der Ruhezeit (Standard 21:00–7:00)',
   'todoList.maxItemsLabel': 'Obergrenze',
   'todoList.maxItemsHint': 'Wie Gerätespeicher (1–30 Aufgaben)',
 }

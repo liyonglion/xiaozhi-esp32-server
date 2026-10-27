@@ -1766,11 +1766,12 @@ export default {
   'todoList.dailySaveHint': 'Mẫu đã lưu có hiệu lực ở lần dựng lại 0:00 tiếp theo',
   'todoList.dailySaveSuccess': 'Đã lưu nhiệm vụ hằng ngày — hiệu lực ở lần dựng lại 0:00 tiếp theo',
   'todoList.deadlinePlaceholder': 'Hạn (tùy chọn)',
+  'todoList.dueHint': 'Nhiệm vụ có hạn chót sẽ được nhắc bằng giọng nói trước 1 giờ và 30 phút; tự hủy khi hoàn thành',
   'todoList.deviceConfigTitle': 'Cấu hình thiết bị',
   'todoList.syncEnabled': 'Đồng bộ danh sách',
   'todoList.syncEnabledHint': 'Tắt: báo mirror, tải xuống của phụ huynh và dựng lại hằng ngày đều dừng cho thiết bị này',
   'todoList.quietPeriod': 'Giờ yên tĩnh',
-  'todoList.quietHint': 'Không đặt nhắc trong giờ yên tĩnh (có hiệu lực khi nhắc hạn được bật)',
+  'todoList.quietHint': 'Không đặt báo thức nhắc nhở trong khung giờ im lặng (mặc định 21:00–7:00)',
   'todoList.maxItemsLabel': 'Giới hạn số mục',
   'todoList.maxItemsHint': 'Trùng dung lượng thiết bị (1–30 mục)',
 }

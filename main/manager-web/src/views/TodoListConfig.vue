@@ -97,6 +97,7 @@
                   <span class="pane-title">{{ $t("todoList.editorTitle") }}</span>
                   <span class="count-hint">{{ items.length }} / 30</span>
                 </div>
+                <div class="due-hint">{{ $t("todoList.dueHint") }}</div>
 
                 <div class="item-rows">
                   <div v-for="(item, idx) in items" :key="idx" class="item-row">
@@ -108,6 +109,16 @@
                       :maxlength="30"
                       show-word-limit
                       @input="markDirty"
+                    />
+                    <el-time-picker
+                      v-model="item.due"
+                      size="small"
+                      class="item-due"
+                      :clearable="true"
+                      value-format="HH:mm"
+                      format="HH:mm"
+                      :placeholder="$t('todoList.deadlinePlaceholder')"
+                      @change="markDirty"
                     />
                     <el-button
                       type="text"
@@ -324,7 +335,7 @@ export default {
         }
         const m = data.data || {};
         if (!this.dirty) {
-          this.items = (m.items || []).map((i) => ({ text: i.text || "", done: !!i.done }));
+          this.items = (m.items || []).map((i) => ({ text: i.text || "", done: !!i.done, due: i.due || null }));
           this.config = {
             syncEnabled: m.syncEnabled !== false,
             quietStart: m.quietStart || "21:00",
@@ -382,7 +393,7 @@ export default {
         this.$message.warning(i18n.t("todoList.maxItems"));
         return false;
       }
-      this.items.push({ text, done: false });
+      this.items.push({ text, done: false, due: null });
       this.dirty = true;
       return true;
     },
@@ -444,7 +455,7 @@ export default {
     },
     save() {
       const items = this.items
-        .map((i) => ({ text: (i.text || "").trim(), done: !!i.done }))
+        .map((i) => ({ text: (i.text || "").trim(), done: !!i.done, due: i.due || null }))
         .filter((i) => i.text);
       if (items.length > MAX_ITEMS) {
         this.$message.warning(i18n.t("todoList.maxItems"));
@@ -611,6 +622,17 @@ export default {
 
 .item-text {
   flex: 1;
+}
+
+.item-due {
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.due-hint {
+  font-size: 12px;
+  color: #979db1;
+  margin: -4px 0 8px;
 }
 
 .item-remove {

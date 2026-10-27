@@ -1766,11 +1766,12 @@ export default {
   'todoList.dailySaveHint': 'Os modelos salvos valem na próxima reconstrução à 0:00',
   'todoList.dailySaveSuccess': 'Tarefas diárias salvas — valem na próxima reconstrução à 0:00',
   'todoList.deadlinePlaceholder': 'Prazo (opc.)',
+  'todoList.dueHint': 'Tarefas com prazo recebem um lembrete de voz 1 hora e 30 minutos antes; cancelado automaticamente ao concluir',
   'todoList.deviceConfigTitle': 'Configurações do dispositivo',
   'todoList.syncEnabled': 'Sincronização',
   'todoList.syncEnabledHint': 'Desligado: espelhamento, envios dos pais e a reconstrução diária param para este dispositivo',
   'todoList.quietPeriod': 'Período silencioso',
-  'todoList.quietHint': 'Sem lembretes no período silencioso (vale quando lembretes de prazo entrarem)',
+  'todoList.quietHint': 'Sem alarmes de lembrete no período de silêncio (padrão 21:00–7:00)',
   'todoList.maxItemsLabel': 'Limite de itens',
   'todoList.maxItemsHint': 'Igual ao armazenamento do dispositivo (1–30 itens)',
 }

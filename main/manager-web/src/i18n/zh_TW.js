@@ -1766,11 +1766,12 @@ export default {
   'todoList.dailySaveHint': '儲存後明天 0 點首次生效',
   'todoList.dailySaveSuccess': '每日任務已儲存，明天 0 點生效',
   'todoList.deadlinePlaceholder': '截止 選填',
+  'todoList.dueHint': '設截止的任務將在提前 1 小時和 30 分鐘時各語音提醒一次，完成後自動取消',
   'todoList.deviceConfigTitle': '裝置級配置',
   'todoList.syncEnabled': '清單同步',
   'todoList.syncEnabledHint': '關閉後：鏡像上報、家長下發與每日重建對本裝置全部停用',
   'todoList.quietPeriod': '靜默時段',
-  'todoList.quietHint': '靜默時段內不設定提醒（截止提醒啟用後生效）',
+  'todoList.quietHint': '靜默時段內不設提醒鬧鐘（預設 21:00–次日 7:00）',
   'todoList.maxItemsLabel': '條數上限',
   'todoList.maxItemsHint': '與裝置儲存上限一致（1–30 條）',
 }
